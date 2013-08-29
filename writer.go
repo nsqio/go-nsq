@@ -13,6 +13,11 @@ import (
 	"time"
 )
 
+// Writer is a high-level type to publish to NSQ.
+//
+// A Writer instance is 1:1 with a destination `nsqd`
+// and will lazily connect to that instance (and re-connect)
+// when Publish commands are executed.
 type Writer struct {
 	net.Conn
 
@@ -32,18 +37,25 @@ type Writer struct {
 	wg              sync.WaitGroup
 }
 
+// WriterTransaction is returned by the async publish methods
+// to retrieve metadata about the command after the
+// response is received.
 type WriterTransaction struct {
 	cmd       *Command
 	doneChan  chan *WriterTransaction
-	FrameType int32
-	Data      []byte
-	Error     error
-	Args      []interface{}
+	FrameType int32         // the frame type received in response to the publish command
+	Data      []byte        // the response data of the publish command
+	Error     error         // the error (or nil) of the publish command
+	Args      []interface{} // the slice of variadic arguments passed to PublishAsync or MultiPublishAsync
 }
 
+// returned when a publish command is made against a Writer that is not connected
 var ErrNotConnected = errors.New("not connected")
+
+// returned when a publish command is made against a Writer that has been stopped
 var ErrStopped = errors.New("stopped")
 
+// NewWriter returns an instance of Writer for the specified address
 func NewWriter(addr string) *Writer {
 	hostname, err := os.Hostname()
 	if err != nil {
@@ -64,10 +76,12 @@ func NewWriter(addr string) *Writer {
 	}
 }
 
+// String returns the address of the Writer
 func (w *Writer) String() string {
 	return w.Addr
 }
 
+// Stop disconnects and permanently stops the Writer
 func (w *Writer) Stop() {
 	if !atomic.CompareAndSwapInt32(&w.stopFlag, 0, 1) {
 		return
@@ -76,10 +90,22 @@ func (w *Writer) Stop() {
 	w.wg.Wait()
 }
 
+// PublishAsync publishes a message body to the specified topic
+// but does not wait for the response from `nsqd`.
+//
+// When the Writer eventually receives the response from `nsqd`, the supplied `doneChan` 
+// will receive a `WriterTransaction` instance with the supplied variadic arguments 
+// (and the response `FrameType`, `Data`, and `Error`)
 func (w *Writer) PublishAsync(topic string, body []byte, doneChan chan *WriterTransaction, args ...interface{}) error {
 	return w.sendCommandAsync(Publish(topic, body), doneChan, args)
 }
 
+// MultiPublishAsync publishes a slice of message bodies to the specified topic
+// but does not wait for the response from `nsqd`.
+//
+// When the Writer eventually receives the response from `nsqd`, the supplied `doneChan` 
+// will receive a `WriterTransaction` instance with the supplied variadic arguments 
+// (and the response `FrameType`, `Data`, and `Error`)
 func (w *Writer) MultiPublishAsync(topic string, body [][]byte, doneChan chan *WriterTransaction, args ...interface{}) error {
 	cmd, err := MultiPublish(topic, body)
 	if err != nil {
@@ -88,10 +114,14 @@ func (w *Writer) MultiPublishAsync(topic string, body [][]byte, doneChan chan *W
 	return w.sendCommandAsync(cmd, doneChan, args)
 }
 
+// Publish synchronously publishes a message body to the specified topic, returning
+// the response frameType, data, and error
 func (w *Writer) Publish(topic string, body []byte) (int32, []byte, error) {
 	return w.sendCommand(Publish(topic, body))
 }
 
+// MultiPublish synchronously publishes a slice of message bodies to the specified topic, returning
+// the response frameType, data, and error
 func (w *Writer) MultiPublish(topic string, body [][]byte) (int32, []byte, error) {
 	cmd, err := MultiPublish(topic, body)
 	if err != nil {

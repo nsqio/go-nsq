@@ -21,10 +21,10 @@ import (
 	"time"
 )
 
-// returned from ConnectToNSQ() when already connected
+// returned from ConnectToNSQ when already connected
 var ErrAlreadyConnected = errors.New("already connected")
 
-// return from updateRdy if over max-in-flight
+// returned from updateRdy if over max-in-flight
 var ErrOverMaxInFlight = errors.New("over configure max-inflight")
 
 // Handler is the synchronous interface to Reader.
