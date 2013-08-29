@@ -1,0 +1,18 @@
+language: go
+go:
+  - 1.0.3
+  - 1.1.2
+env:
+  - GOARCH=amd64
+  - GOARCH=386
+install:
+  - go get github.com/bitly/go-simplejson
+script:
+  - wget https://github.com/bitly/nsq/releases/download/v0.2.22/nsq-0.2.22.linux-amd64.go1.1.2.tar.gz
+  - tar zxvf nsq-0.2.22.linux-amd64.go1.1.2.tar.gz
+  - sudo cp nsq-0.2.22.linux-amd64.go1.1.2/bin/nsqd nsq-0.2.22.linux-amd64.go1.1.2/bin/nsqlookupd /usr/local/bin
+  - pushd $TRAVIS_BUILD_DIR
+  - ./test.sh
+  - popd
+notifications:
+  email: false
