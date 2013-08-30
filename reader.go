@@ -3,10 +3,12 @@ package nsq
 import (
 	"bufio"
 	"bytes"
+	"compress/flate"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/mreiferson/go-snappystream"
 	"io"
 	"log"
 	"math"
@@ -84,23 +86,30 @@ type nsqConn struct {
 	lastMsgTimestamp int64
 
 	sync.Mutex
-	net.Conn
 
-	tlsConn          *tls.Conn
-	r                io.Reader
-	w                io.Writer
-	addr             string
-	stopFlag         int32
+	net.Conn
+	tlsConn *tls.Conn
+	addr    string
+
+	r io.Reader
+	w io.Writer
+
+	flateWriter *flate.Writer
+
+	readTimeout  time.Duration
+	writeTimeout time.Duration
+
+	backoffCounter int32
+	rdyRetryTimer  *time.Timer
+
 	finishedMessages chan *FinishedMessage
-	readTimeout      time.Duration
-	writeTimeout     time.Duration
-	stopper          sync.Once
 	dying            chan int
 	drainReady       chan int
 	readyChan        chan int
 	exitChan         chan int
-	backoffCounter   int32
-	rdyRetryTimer    *time.Timer
+
+	stopFlag int32
+	stopper  sync.Once
 }
 
 func newNSQConn(addr string, readTimeout time.Duration, writeTimeout time.Duration) (*nsqConn, error) {
@@ -110,19 +119,23 @@ func newNSQConn(addr string, readTimeout time.Duration, writeTimeout time.Durati
 	}
 
 	nc := &nsqConn{
-		Conn:             conn,
-		r:                bufio.NewReader(conn),
-		w:                conn,
-		addr:             addr,
-		finishedMessages: make(chan *FinishedMessage),
+		Conn: conn,
+
+		addr: addr,
+
+		r: bufio.NewReader(conn),
+		w: conn,
+
 		readTimeout:      readTimeout,
 		writeTimeout:     writeTimeout,
+		maxRdyCount:      2500,
+		lastMsgTimestamp: time.Now().UnixNano(),
+
+		finishedMessages: make(chan *FinishedMessage),
 		dying:            make(chan int, 1),
 		drainReady:       make(chan int),
 		readyChan:        make(chan int, 1),
 		exitChan:         make(chan int),
-		maxRdyCount:      2500,
-		lastMsgTimestamp: time.Now().UnixNano(),
 	}
 
 	_, err = nc.Write(MagicV2)
@@ -163,6 +176,10 @@ func (c *nsqConn) sendCommand(buf *bytes.Buffer, cmd *Command) error {
 		return err
 	}
 
+	if c.flateWriter != nil {
+		return c.flateWriter.Flush()
+	}
+
 	return nil
 }
 
@@ -188,6 +205,42 @@ func (c *nsqConn) upgradeTLS(conf *tls.Config) error {
 	}
 	if frameType != FrameTypeResponse || !bytes.Equal(data, []byte("OK")) {
 		return errors.New("invalid response from TLS upgrade")
+	}
+	return nil
+}
+
+func (c *nsqConn) upgradeDeflate(level int) error {
+	conn := c.Conn
+	if c.tlsConn != nil {
+		conn = c.tlsConn
+	}
+	c.r = bufio.NewReader(flate.NewReader(conn))
+	fw, _ := flate.NewWriter(conn, level)
+	c.flateWriter = fw
+	c.w = fw
+	frameType, data, err := c.readUnpackedResponse()
+	if err != nil {
+		return err
+	}
+	if frameType != FrameTypeResponse || !bytes.Equal(data, []byte("OK")) {
+		return errors.New("invalid response from Deflate upgrade")
+	}
+	return nil
+}
+
+func (c *nsqConn) upgradeSnappy() error {
+	conn := c.Conn
+	if c.tlsConn != nil {
+		conn = c.tlsConn
+	}
+	c.r = bufio.NewReader(snappystream.NewReader(conn, snappystream.SkipVerifyChecksum))
+	c.w = snappystream.NewWriter(conn)
+	frameType, data, err := c.readUnpackedResponse()
+	if err != nil {
+		return err
+	}
+	if frameType != FrameTypeResponse || !bytes.Equal(data, []byte("OK")) {
+		return errors.New("invalid response from Snappy upgrade")
 	}
 	return nil
 }
@@ -218,38 +271,59 @@ type Reader struct {
 
 	sync.RWMutex
 
-	TopicName           string        // name of topic to subscribe to
-	ChannelName         string        // name of channel to subscribe to
+	// basics
+	TopicName       string   // name of topic to subscribe to
+	ChannelName     string   // name of channel to subscribe to
+	ShortIdentifier string   // an identifier to send to nsqd when connecting (defaults: short hostname)
+	LongIdentifier  string   // an identifier to send to nsqd when connecting (defaults: long hostname)
+	VerboseLogging  bool     // enable verbose logging
+	ExitChan        chan int // read from this channel to block your main loop
+
+	// network deadlines
+	ReadTimeout  time.Duration // the deadline set for network reads
+	WriteTimeout time.Duration // the deadline set for network writes
+
+	// lookupd
 	LookupdPollInterval time.Duration // duration between polling lookupd for new connections
 	LookupdPollJitter   float64       // Maximum fractional amount of jitter to add to the lookupd pool loop. This helps evenly distribute requests even if multiple consumers restart at the same time.
-	MaxAttemptCount     uint16        // maximum number of times this reader will attempt to process a message
-	DefaultRequeueDelay time.Duration // the default duration when REQueueing
+
+	// requeue delays
 	MaxRequeueDelay     time.Duration // the maximum duration when REQueueing (for doubling backoff)
-	LowRdyIdleTimeout   time.Duration // the amount of time in seconds to wait for a message from a producer when in a state where RDY counts are re-distributed (ie. max_in_flight < num_producers)
-	VerboseLogging      bool          // enable verbose logging
-	ShortIdentifier     string        // an identifier to send to nsqd when connecting (defaults: short hostname)
-	LongIdentifier      string        // an identifier to send to nsqd when connecting (defaults: long hostname)
-	ReadTimeout         time.Duration // the deadline set for network reads
-	WriteTimeout        time.Duration // the deadline set for network writes
-	ExitChan            chan int      // read from this channel to block your main loop
-	TLSv1               bool          // negotiate enabling TLS
-	TLSConfig           *tls.Config   // client TLS configuration
+	DefaultRequeueDelay time.Duration // the default duration when REQueueing
+
+	// misc
+	MaxAttemptCount   uint16        // maximum number of times this reader will attempt to process a message
+	LowRdyIdleTimeout time.Duration // the amount of time in seconds to wait for a message from a producer when in a state where RDY counts are re-distributed (ie. max_in_flight < num_producers)
+
+	// transport layer security
+	TLSv1     bool        // negotiate enabling TLS
+	TLSConfig *tls.Config // client TLS configuration
+
+	// compression
+	Deflate      bool // negotiate enabling Deflate compression
+	DeflateLevel int  // the compression level to negotiate for Deflate
+	Snappy       bool // negotiate enabling Snappy compression
 
 	// internal variables
-	redistributeOnce   sync.Once
+	redistributeOnce sync.Once
+
 	maxBackoffDuration time.Duration
 	maxBackoffCount    int32
 	maxInFlight        int
-	incomingMessages   chan *incomingMessage
+
+	incomingMessages chan *incomingMessage
+
 	pendingConnections map[string]bool
 	nsqConnections     map[string]*nsqConn
+
 	lookupdExitChan    chan int
 	lookupdRecheckChan chan int
-	stopFlag           int32
-	runningHandlers    int32
 	lookupdHTTPAddrs   []string
-	stopHandler        sync.Once
 	lookupdQueryIndex  int
+
+	runningHandlers int32
+	stopFlag        int32
+	stopHandler     sync.Once
 }
 
 // NewReader creates a new instance of Reader for the specified topic/channel
@@ -270,25 +344,37 @@ func NewReader(topic string, channel string) (*Reader, error) {
 		log.Fatalf("ERROR: unable to get hostname %s", err.Error())
 	}
 	q := &Reader{
-		TopicName:           topic,
-		ChannelName:         channel,
-		incomingMessages:    make(chan *incomingMessage),
-		ExitChan:            make(chan int),
-		pendingConnections:  make(map[string]bool),
-		nsqConnections:      make(map[string]*nsqConn),
-		MaxAttemptCount:     5,
+		TopicName:   topic,
+		ChannelName: channel,
+
+		MaxAttemptCount: 5,
+
 		LookupdPollInterval: 60 * time.Second,
 		LookupdPollJitter:   0.3,
-		LowRdyIdleTimeout:   10 * time.Second,
-		lookupdExitChan:     make(chan int),
-		lookupdRecheckChan:  make(chan int, 1), // used at connection close to force a possible reconnect
+
+		LowRdyIdleTimeout: 10 * time.Second,
+
 		DefaultRequeueDelay: 90 * time.Second,
 		MaxRequeueDelay:     15 * time.Minute,
-		ShortIdentifier:     strings.Split(hostname, ".")[0],
-		LongIdentifier:      hostname,
-		ReadTimeout:         DefaultClientTimeout,
-		WriteTimeout:        time.Second,
-		maxInFlight:         1,
+
+		ShortIdentifier: strings.Split(hostname, ".")[0],
+		LongIdentifier:  hostname,
+
+		ReadTimeout:  DefaultClientTimeout,
+		WriteTimeout: time.Second,
+
+		DeflateLevel: 6,
+
+		incomingMessages: make(chan *incomingMessage),
+
+		pendingConnections: make(map[string]bool),
+		nsqConnections:     make(map[string]*nsqConn),
+
+		lookupdExitChan:    make(chan int),
+		lookupdRecheckChan: make(chan int, 1), // used at connection close to force a possible reconnect
+		maxInFlight:        1,
+
+		ExitChan: make(chan int),
 	}
 	q.SetMaxBackoffDuration(120 * time.Second)
 	return q, nil
@@ -505,6 +591,9 @@ func (q *Reader) ConnectToNSQ(addr string) error {
 	ci["short_id"] = q.ShortIdentifier
 	ci["long_id"] = q.LongIdentifier
 	ci["tls_v1"] = q.TLSv1
+	ci["deflate"] = q.Deflate
+	ci["deflate_level"] = q.DeflateLevel
+	ci["snappy"] = q.Snappy
 	ci["feature_negotiation"] = true
 	cmd, err := Identify(ci)
 	if err != nil {
@@ -529,6 +618,8 @@ func (q *Reader) ConnectToNSQ(addr string) error {
 		resp := struct {
 			MaxRdyCount int64 `json:"max_rdy_count"`
 			TLSv1       bool  `json:"tls_v1"`
+			Deflate     bool  `json:"deflate"`
+			Snappy      bool  `json:"snappy"`
 		}{}
 		err := json.Unmarshal(data, &resp)
 		if err != nil {
@@ -550,6 +641,24 @@ func (q *Reader) ConnectToNSQ(addr string) error {
 			if err != nil {
 				cleanupConnection()
 				return fmt.Errorf("[%s] error (%s) upgrading to TLS", connection, err.Error())
+			}
+		}
+
+		if resp.Deflate {
+			log.Printf("[%s] upgrading to Deflate", connection)
+			err := connection.upgradeDeflate(q.DeflateLevel)
+			if err != nil {
+				connection.Close()
+				return fmt.Errorf("[%s] error (%s) upgrading to deflate", connection, err.Error())
+			}
+		}
+
+		if resp.Snappy {
+			log.Printf("[%s] upgrading to Snappy", connection)
+			err := connection.upgradeSnappy()
+			if err != nil {
+				connection.Close()
+				return fmt.Errorf("[%s] error (%s) upgrading to snappy", connection, err.Error())
 			}
 		}
 	}
