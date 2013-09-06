@@ -93,8 +93,8 @@ func (w *Writer) Stop() {
 // PublishAsync publishes a message body to the specified topic
 // but does not wait for the response from `nsqd`.
 //
-// When the Writer eventually receives the response from `nsqd`, the supplied `doneChan` 
-// will receive a `WriterTransaction` instance with the supplied variadic arguments 
+// When the Writer eventually receives the response from `nsqd`, the supplied `doneChan`
+// will receive a `WriterTransaction` instance with the supplied variadic arguments
 // (and the response `FrameType`, `Data`, and `Error`)
 func (w *Writer) PublishAsync(topic string, body []byte, doneChan chan *WriterTransaction, args ...interface{}) error {
 	return w.sendCommandAsync(Publish(topic, body), doneChan, args)
@@ -103,8 +103,8 @@ func (w *Writer) PublishAsync(topic string, body []byte, doneChan chan *WriterTr
 // MultiPublishAsync publishes a slice of message bodies to the specified topic
 // but does not wait for the response from `nsqd`.
 //
-// When the Writer eventually receives the response from `nsqd`, the supplied `doneChan` 
-// will receive a `WriterTransaction` instance with the supplied variadic arguments 
+// When the Writer eventually receives the response from `nsqd`, the supplied `doneChan`
+// will receive a `WriterTransaction` instance with the supplied variadic arguments
 // (and the response `FrameType`, `Data`, and `Error`)
 func (w *Writer) MultiPublishAsync(topic string, body [][]byte, doneChan chan *WriterTransaction, args ...interface{}) error {
 	cmd, err := MultiPublish(topic, body)
