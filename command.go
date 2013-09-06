@@ -73,18 +73,8 @@ func (c *Command) Write(w io.Writer) error {
 // The supplied map is marshaled into JSON to provide some flexibility
 // for this command to evolve over time.
 //
-// nsqd currently supports the following keys:
-//
-//     short_id - short identifier, typically client's short hosname
-//     long_id - long identifier, typically client's long hostname
-//     buffer_size - size in bytes for nsqd to buffer before writing to the wire for this client
-//
-// nsqlookupd currently supports the following keys:
-//
-//     version - the version of the nsqd peer
-//     tcp_port - the nsqd port where TCP clients can connect
-//     http_port - the nsqd port where HTTP clients can connect
-//     address - the address where clients can connect (generally DNS resolvable hostname)
+// See http://bitly.github.io/nsq/clients/tcp_protocol_spec.html#identify for information
+// on the supported options
 func Identify(js map[string]interface{}) (*Command, error) {
 	body, err := json.Marshal(js)
 	if err != nil {
