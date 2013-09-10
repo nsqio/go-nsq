@@ -302,7 +302,7 @@ func (q *Reader) ConnectionMaxInFlight() int64 {
 	q.RLock()
 	defer q.RUnlock()
 
-	b := float64(q.maxInFlight)
+	b := float64(q.MaxInFlight())
 	s := b / float64(len(q.nsqConnections))
 	return int64(math.Min(math.Max(1, s), b))
 }
@@ -332,14 +332,16 @@ func (q *Reader) SetMaxInFlight(maxInFlight int) {
 		return
 	}
 
+	q.Lock()
 	if q.maxInFlight == maxInFlight {
+		q.Unlock()
 		return
 	}
 	q.maxInFlight = maxInFlight
+	q.Unlock()
 
 	q.RLock()
 	defer q.RUnlock()
-
 	for _, c := range q.nsqConnections {
 		c.tryUpdateRDY()
 	}
@@ -353,6 +355,8 @@ func (q *Reader) SetMaxBackoffDuration(duration time.Duration) {
 
 // MaxInFlight returns the configured maximum number of messages to allow in-flight.
 func (q *Reader) MaxInFlight() int {
+	q.RLock()
+	defer q.RUnlock()
 	return q.maxInFlight
 }
 
@@ -535,9 +539,9 @@ func (q *Reader) ConnectToNSQ(addr string) error {
 		log.Printf("[%s] IDENTIFY response: %+v", connection, resp)
 
 		connection.maxRdyCount = resp.MaxRdyCount
-		if resp.MaxRdyCount < int64(q.maxInFlight) {
+		if resp.MaxRdyCount < int64(q.MaxInFlight()) {
 			log.Printf("[%s] max RDY count %d < reader max in flight %d, truncation possible",
-				connection, resp.MaxRdyCount, q.maxInFlight)
+				connection, resp.MaxRdyCount, q.MaxInFlight())
 		}
 
 		if resp.TLSv1 {
@@ -883,7 +887,7 @@ func (q *Reader) updateRDY(c *nsqConn, count int64) error {
 
 	// never exceed our global max in flight. truncate if possible.
 	// this could help a new connection get partial max-in-flight
-	maxPossibleRdy := int64(q.maxInFlight) - atomic.LoadInt64(&q.totalRdyCount) + atomic.LoadInt64(&c.rdyCount)
+	maxPossibleRdy := int64(q.MaxInFlight()) - atomic.LoadInt64(&q.totalRdyCount) + atomic.LoadInt64(&c.rdyCount)
 	if maxPossibleRdy > 0 && maxPossibleRdy < count {
 		count = maxPossibleRdy
 	}
@@ -928,11 +932,13 @@ func (q *Reader) redistributeRdyState() {
 		q.RLock()
 		l := len(q.nsqConnections)
 		q.RUnlock()
-		if l <= q.maxInFlight {
+
+		maxInFlight := q.MaxInFlight()
+		if l <= maxInFlight {
 			continue
 		}
 
-		log.Printf("redistributing ready state (%d conns > %d max_in_flight)", l, q.maxInFlight)
+		log.Printf("redistributing ready state (%d conns > %d max_in_flight)", l, maxInFlight)
 		q.RLock()
 		possibleConns := make([]*nsqConn, 0, len(q.nsqConnections))
 		for _, c := range q.nsqConnections {
@@ -948,7 +954,7 @@ func (q *Reader) redistributeRdyState() {
 			}
 			possibleConns = append(possibleConns, c)
 		}
-		availableMaxInFlight := int64(q.maxInFlight) - atomic.LoadInt64(&q.totalRdyCount)
+		availableMaxInFlight := int64(maxInFlight) - atomic.LoadInt64(&q.totalRdyCount)
 		for len(possibleConns) > 0 && availableMaxInFlight > 0 {
 			availableMaxInFlight--
 			i := rand.Int() % len(possibleConns)
