@@ -63,18 +63,51 @@ func TestReader(t *testing.T) {
 	log.SetOutput(ioutil.Discard)
 	defer log.SetOutput(os.Stdout)
 
-	readerTest(t, false)
+	readerTest(t, false, false, false)
 }
 
 func TestReaderTLS(t *testing.T) {
 	log.SetOutput(ioutil.Discard)
 	defer log.SetOutput(os.Stdout)
 
-	readerTest(t, true)
+	readerTest(t, false, false, true)
 }
 
-func readerTest(t *testing.T, tlsv1 bool) {
-	topicName := "reader_test"
+func TestReaderDeflate(t *testing.T) {
+	log.SetOutput(ioutil.Discard)
+	defer log.SetOutput(os.Stdout)
+
+	readerTest(t, true, false, false)
+}
+
+func TestReaderSnappy(t *testing.T) {
+	log.SetOutput(ioutil.Discard)
+	defer log.SetOutput(os.Stdout)
+
+	readerTest(t, false, true, false)
+}
+
+func TestReaderTLSDeflate(t *testing.T) {
+	log.SetOutput(ioutil.Discard)
+	defer log.SetOutput(os.Stdout)
+
+	readerTest(t, true, false, true)
+}
+
+func TestReaderTLSSnappy(t *testing.T) {
+	log.SetOutput(ioutil.Discard)
+	defer log.SetOutput(os.Stdout)
+
+	readerTest(t, false, true, true)
+}
+
+func readerTest(t *testing.T, deflate bool, snappy bool, tlsv1 bool) {
+	topicName := "rdr_test"
+	if deflate {
+		topicName = topicName + "_deflate"
+	} else if snappy {
+		topicName = topicName + "_snappy"
+	}
 	if tlsv1 {
 		topicName = topicName + "_tls"
 	}
@@ -87,6 +120,12 @@ func readerTest(t *testing.T, tlsv1 bool) {
 	// so that the test wont timeout from backing off
 	q.SetMaxBackoffDuration(time.Millisecond * 50)
 
+	if deflate {
+		q.Deflate = true
+		q.DeflateLevel = 6
+	} else if snappy {
+		q.Snappy = true
+	}
 	if tlsv1 {
 		q.TLSv1 = true
 		q.TLSConfig = &tls.Config{
