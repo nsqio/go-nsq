@@ -50,7 +50,7 @@ type Handler interface {
 //
 // To the supplied responseChannel to indicate that a message is processed.
 type AsyncHandler interface {
-	HandleMessage(message *Message, responseChannel chan *FinishedMessage, commandChannel chan *Command)
+	HandleMessage(message *Message, responseChannel chan *FinishedMessage)
 }
 
 // FinishedMessage is the data type used over responseChannel in AsyncHandlers
@@ -70,7 +70,6 @@ type FailedMessageLogger interface {
 type incomingMessage struct {
 	*Message
 	responseChannel chan *FinishedMessage
-	commandChannel  chan *Command
 }
 
 type nsqConn struct {
@@ -623,6 +622,8 @@ func (q *Reader) readLoop(c *nsqConn) {
 		switch frameType {
 		case FrameTypeMessage:
 			msg, err := DecodeMessage(data)
+			msg.commandChannel = c.commandMessages
+
 			if err != nil {
 				handleError(q, c, fmt.Sprintf("[%s] error (%s) decoding message %s", c, err.Error(), data))
 				continue
@@ -640,7 +641,7 @@ func (q *Reader) readLoop(c *nsqConn) {
 				log.Printf("[%s] (remain %d) FrameTypeMessage: %s - %s", c, remain, msg.Id, msg.Body)
 			}
 
-			q.incomingMessages <- &incomingMessage{msg, c.finishedMessages, c.commandMessages}
+			q.incomingMessages <- &incomingMessage{msg, c.finishedMessages}
 
 			c.tryUpdateRDY()
 		case FrameTypeResponse:
@@ -1096,7 +1097,7 @@ func (q *Reader) AddAsyncHandler(handler AsyncHandler) {
 				continue
 			}
 
-			handler.HandleMessage(message.Message, message.responseChannel, message.commandChannel)
+			handler.HandleMessage(message.Message, message.responseChannel)
 		}
 	}()
 }
