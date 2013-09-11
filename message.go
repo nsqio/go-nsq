@@ -20,6 +20,8 @@ type Message struct {
 	Body      []byte
 	Timestamp int64
 	Attempts  uint16
+
+	cmdChan chan *Command
 }
 
 // NewMessage creates a Message, initializes some metadata,
@@ -30,6 +32,12 @@ func NewMessage(id MessageID, body []byte) *Message {
 		Body:      body,
 		Timestamp: time.Now().UnixNano(),
 	}
+}
+
+// Touch sends a TOUCH command to the nsqd which
+// sent this message
+func (m *Message) Touch() {
+	m.cmdChan <- Touch(m.Id)
 }
 
 // EncodeBytes serializes the message into a new, returned, []byte
