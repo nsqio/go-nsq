@@ -50,7 +50,7 @@ type Handler interface {
 //
 // To the supplied responseChannel to indicate that a message is processed.
 type AsyncHandler interface {
-	HandleMessage(message *Message, responseChannel chan *FinishedMessage)
+	HandleMessage(message *Message, responseChannel chan *FinishedMessage, commandChannel chan *Command)
 }
 
 // FinishedMessage is the data type used over responseChannel in AsyncHandlers
@@ -70,6 +70,7 @@ type FailedMessageLogger interface {
 type incomingMessage struct {
 	*Message
 	responseChannel chan *FinishedMessage
+	commandChannel  chan *Command
 }
 
 type nsqConn struct {
@@ -92,6 +93,7 @@ type nsqConn struct {
 	addr             string
 	stopFlag         int32
 	finishedMessages chan *FinishedMessage
+	commandMessages  chan *Command //command channel
 	readTimeout      time.Duration
 	writeTimeout     time.Duration
 	stopper          sync.Once
@@ -115,6 +117,7 @@ func newNSQConn(addr string, readTimeout time.Duration, writeTimeout time.Durati
 		w:                conn,
 		addr:             addr,
 		finishedMessages: make(chan *FinishedMessage),
+		commandMessages:  make(chan *Command), //command channel
 		readTimeout:      readTimeout,
 		writeTimeout:     writeTimeout,
 		dying:            make(chan int, 1),
@@ -637,7 +640,7 @@ func (q *Reader) readLoop(c *nsqConn) {
 				log.Printf("[%s] (remain %d) FrameTypeMessage: %s - %s", c, remain, msg.Id, msg.Body)
 			}
 
-			q.incomingMessages <- &incomingMessage{msg, c.finishedMessages}
+			q.incomingMessages <- &incomingMessage{msg, c.finishedMessages, c.commandMessages}
 
 			c.tryUpdateRDY()
 		case FrameTypeResponse:
@@ -681,6 +684,13 @@ func (q *Reader) finishLoop(c *nsqConn) {
 			// Indicate drainReady because we will not pull any more off finishedMessages
 			c.drainReady <- 1
 			goto exit
+		case cmd := <-c.commandMessages:
+			err := c.sendCommand(&buf, cmd)
+			if err != nil {
+				log.Printf("[%s] commandMessage error:%v ", c, err)
+			}
+			c.Write(buf.Bytes())
+
 		case msg := <-c.finishedMessages:
 			// Decrement this here so it is correct even if we can't respond to nsqd
 			atomic.AddInt64(&q.messagesInFlight, -1)
@@ -1086,7 +1096,7 @@ func (q *Reader) AddAsyncHandler(handler AsyncHandler) {
 				continue
 			}
 
-			handler.HandleMessage(message.Message, message.responseChannel)
+			handler.HandleMessage(message.Message, message.responseChannel, message.commandChannel)
 		}
 	}()
 }
