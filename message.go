@@ -16,10 +16,11 @@ type MessageID [MsgIdLength]byte
 // Message is the fundamental data type containing
 // the id, body, and metadata
 type Message struct {
-	Id        MessageID
-	Body      []byte
-	Timestamp int64
-	Attempts  uint16
+	Id             MessageID
+	Body           []byte
+	Timestamp      int64
+	Attempts       uint16
+	commandChannel chan *Command
 }
 
 // NewMessage creates a Message, initializes some metadata,
@@ -30,6 +31,11 @@ func NewMessage(id MessageID, body []byte) *Message {
 		Body:      body,
 		Timestamp: time.Now().UnixNano(),
 	}
+}
+
+//send touch to server .
+func (m *Message) Touch() {
+	m.commandChannel <- Touch(m.Id)
 }
 
 // EncodeBytes serializes the message into a new, returned, []byte

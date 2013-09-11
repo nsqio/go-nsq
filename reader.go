@@ -92,6 +92,7 @@ type nsqConn struct {
 	addr             string
 	stopFlag         int32
 	finishedMessages chan *FinishedMessage
+	commandMessages  chan *Command //command channel
 	readTimeout      time.Duration
 	writeTimeout     time.Duration
 	stopper          sync.Once
@@ -115,6 +116,7 @@ func newNSQConn(addr string, readTimeout time.Duration, writeTimeout time.Durati
 		w:                conn,
 		addr:             addr,
 		finishedMessages: make(chan *FinishedMessage),
+		commandMessages:  make(chan *Command), //command channel
 		readTimeout:      readTimeout,
 		writeTimeout:     writeTimeout,
 		dying:            make(chan int, 1),
@@ -620,6 +622,8 @@ func (q *Reader) readLoop(c *nsqConn) {
 		switch frameType {
 		case FrameTypeMessage:
 			msg, err := DecodeMessage(data)
+			msg.commandChannel = c.commandMessages
+
 			if err != nil {
 				handleError(q, c, fmt.Sprintf("[%s] error (%s) decoding message %s", c, err.Error(), data))
 				continue
@@ -681,6 +685,13 @@ func (q *Reader) finishLoop(c *nsqConn) {
 			// Indicate drainReady because we will not pull any more off finishedMessages
 			c.drainReady <- 1
 			goto exit
+		case cmd := <-c.commandMessages:
+			err := c.sendCommand(&buf, cmd)
+			if err != nil {
+				log.Printf("[%s] commandMessage error:%v ", c, err)
+			}
+			c.Write(buf.Bytes())
+
 		case msg := <-c.finishedMessages:
 			// Decrement this here so it is correct even if we can't respond to nsqd
 			atomic.AddInt64(&q.messagesInFlight, -1)
