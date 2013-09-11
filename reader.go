@@ -103,6 +103,7 @@ type nsqConn struct {
 	rdyRetryTimer  *time.Timer
 
 	finishedMessages chan *FinishedMessage
+	cmdChan          chan *Command
 	dying            chan int
 	drainReady       chan int
 	readyChan        chan int
@@ -132,6 +133,7 @@ func newNSQConn(addr string, readTimeout time.Duration, writeTimeout time.Durati
 		lastMsgTimestamp: time.Now().UnixNano(),
 
 		finishedMessages: make(chan *FinishedMessage),
+		cmdChan:          make(chan *Command),
 		dying:            make(chan int, 1),
 		drainReady:       make(chan int),
 		readyChan:        make(chan int, 1),
@@ -733,6 +735,8 @@ func (q *Reader) readLoop(c *nsqConn) {
 		switch frameType {
 		case FrameTypeMessage:
 			msg, err := DecodeMessage(data)
+			msg.cmdChan = c.cmdChan
+
 			if err != nil {
 				handleError(q, c, fmt.Sprintf("[%s] error (%s) decoding message %s", c, err.Error(), data))
 				continue
@@ -790,10 +794,17 @@ func (q *Reader) finishLoop(c *nsqConn) {
 	for {
 		select {
 		case <-c.dying:
-			log.Printf("[%s] breaking out of finish loop ", c)
+			log.Printf("[%s] breaking out of finish loop", c)
 			// Indicate drainReady because we will not pull any more off finishedMessages
 			c.drainReady <- 1
 			goto exit
+		case cmd := <-c.cmdChan:
+			err := c.sendCommand(&buf, cmd)
+			if err != nil {
+				log.Printf("[%s] error sending command %s - %s", c, cmd, err)
+				q.stopFinishLoop(c)
+				continue
+			}
 		case msg := <-c.finishedMessages:
 			// Decrement this here so it is correct even if we can't respond to nsqd
 			atomic.AddInt64(&q.messagesInFlight, -1)
