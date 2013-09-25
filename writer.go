@@ -93,7 +93,8 @@ func (w *Writer) Stop() {
 // PublishAsync publishes a message body to the specified topic
 // but does not wait for the response from `nsqd`.
 //
-// When the Writer eventually receives the response from `nsqd`, the supplied `doneChan`
+// When the Writer eventually receives the response from `nsqd`,
+// the supplied `doneChan` (if specified)
 // will receive a `WriterTransaction` instance with the supplied variadic arguments
 // (and the response `FrameType`, `Data`, and `Error`)
 func (w *Writer) PublishAsync(topic string, body []byte, doneChan chan *WriterTransaction, args ...interface{}) error {
@@ -103,7 +104,8 @@ func (w *Writer) PublishAsync(topic string, body []byte, doneChan chan *WriterTr
 // MultiPublishAsync publishes a slice of message bodies to the specified topic
 // but does not wait for the response from `nsqd`.
 //
-// When the Writer eventually receives the response from `nsqd`, the supplied `doneChan`
+// When the Writer eventually receives the response from `nsqd`,
+// the supplied `doneChan` (if specified)
 // will receive a `WriterTransaction` instance with the supplied variadic arguments
 // (and the response `FrameType`, `Data`, and `Error`)
 func (w *Writer) MultiPublishAsync(topic string, body [][]byte, doneChan chan *WriterTransaction, args ...interface{}) error {
@@ -288,7 +290,7 @@ func (w *Writer) messageRouter() {
 			t.FrameType = frameType
 			t.Data = data
 			t.Error = err
-			t.doneChan <- t
+			t.done()
 		case <-w.closeChan:
 			goto exit
 		}
@@ -302,7 +304,7 @@ exit:
 func (w *Writer) transactionCleanup() {
 	for _, t := range w.transactions {
 		t.Error = ErrNotConnected
-		t.doneChan <- t
+		t.done()
 	}
 	w.transactions = w.transactions[:0]
 }
@@ -329,4 +331,10 @@ func (w *Writer) readLoop() {
 exit:
 	w.wg.Done()
 	log.Printf("[%s] exiting readLoop()", w)
+}
+
+func (t *WriterTransaction) done() {
+	if t.doneChan != nil {
+		t.doneChan <- t
+	}
 }
