@@ -40,6 +40,12 @@ func (m *Message) Touch() {
 	m.cmdChan <- Touch(m.Id)
 }
 
+// Requeue sends a REQUEUE command to the nsqd which
+// sent this message, using the supplied delay
+func (m *Message) Requeue(timeoutMs int) {
+	m.cmdChan <- Requeue(m.Id, timeoutMs)
+}
+
 // EncodeBytes serializes the message into a new, returned, []byte
 func (m *Message) EncodeBytes() ([]byte, error) {
 	var buf bytes.Buffer
