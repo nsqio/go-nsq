@@ -527,16 +527,29 @@ func (q *Reader) queryLookupd() {
 		return
 	}
 
-	// {"data":{"channels":[],"producers":[{"address":"jehiah-air.local", "tpc_port":4150, "http_port":4151}],"timestamp":1340152173},"status_code":200,"status_txt":"OK"}
-	producers, _ := data.Get("producers").Array()
-	for _, producer := range producers {
-		producerData, _ := producer.(map[string]interface{})
-		address := producerData["address"].(string)
-		broadcastAddress, ok := producerData["broadcast_address"]
+	// {
+	//     "data": {
+	//         "channels": [],
+	//         "producers": [
+	//             {
+	//                 "broadcast_address": "jehiah-air.local",
+	//                 "http_port": 4151,
+	//                 "tcp_port": 4150
+	//             }
+	//         ],
+	//         "timestamp": 1340152173
+	//     },
+	//     "status_code": 200,
+	//     "status_txt": "OK"
+	// }
+	for i, _ := range data.Get("producers").MustArray() {
+		producer := data.Get("producers").GetIndex(i)
+		address := producer.Get("address").MustString()
+		broadcastAddress, ok := producer.CheckGet("broadcast_address")
 		if ok {
-			address = broadcastAddress.(string)
+			address = broadcastAddress.MustString()
 		}
-		port := int(producerData["tcp_port"].(float64))
+		port := producer.Get("tcp_port").MustInt()
 
 		// make an address, start a connection
 		joined := net.JoinHostPort(address, strconv.Itoa(port))
