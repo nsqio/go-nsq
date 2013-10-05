@@ -176,7 +176,7 @@ func (w *Writer) connect() error {
 	}
 
 	if !atomic.CompareAndSwapInt32(&w.state, StateInit, StateConnected) {
-		return nil
+		return ErrNotConnected
 	}
 
 	conn, err := net.DialTimeout("tcp", w.Addr, time.Second*5)
