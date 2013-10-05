@@ -260,8 +260,6 @@ func (w *Writer) close() {
 }
 
 func (w *Writer) messageRouter() {
-	defer w.transactionCleanup()
-
 	for {
 		select {
 		case t := <-w.transactionChan:
@@ -305,6 +303,7 @@ func (w *Writer) messageRouter() {
 	}
 
 exit:
+	w.transactionCleanup()
 	w.wg.Done()
 	log.Printf("[%s] exiting messageRouter()", w)
 }
