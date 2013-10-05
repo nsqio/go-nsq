@@ -27,6 +27,8 @@ type Writer struct {
 	ShortIdentifier   string
 	LongIdentifier    string
 
+	concurrentWriters int32
+
 	transactionChan chan *WriterTransaction
 	dataChan        chan []byte
 	transactions    []*WriterTransaction
@@ -150,23 +152,31 @@ func (w *Writer) sendCommand(cmd *Command) (int32, []byte, error) {
 }
 
 func (w *Writer) sendCommandAsync(cmd *Command, doneChan chan *WriterTransaction, args []interface{}) error {
+	// keep track of how many outstanding writers we're dealing with
+	// in order to later ensure that we clean them all up...
+	atomic.AddInt32(&w.concurrentWriters, 1)
+	defer atomic.AddInt32(&w.concurrentWriters, -1)
+
 	if atomic.LoadInt32(&w.state) != StateConnected {
 		err := w.connect()
 		if err != nil {
 			return err
 		}
 	}
+
 	t := &WriterTransaction{
 		cmd:       cmd,
 		doneChan:  doneChan,
 		FrameType: -1,
 		Args:      args,
 	}
+
 	select {
 	case w.transactionChan <- t:
 	case <-w.exitChan:
 		return ErrStopped
 	}
+
 	return nil
 }
 
@@ -310,11 +320,31 @@ exit:
 }
 
 func (w *Writer) transactionCleanup() {
+	// clean up transactions we can easily account for
 	for _, t := range w.transactions {
 		t.Error = ErrNotConnected
 		t.finish()
 	}
 	w.transactions = w.transactions[:0]
+
+	// spin and free up any writes that might have raced
+	// with the cleanup process (blocked on writing
+	// to transactionChan)
+	for {
+		select {
+		case t := <-w.transactionChan:
+			t.Error = ErrNotConnected
+			t.finish()
+		default:
+			// keep spinning until there are 0 concurrent writers
+			if atomic.LoadInt32(&w.concurrentWriters) == 0 {
+				return
+			}
+			// give the runtime a chance to schedule other racing goroutines
+			time.Sleep(5 * time.Millisecond)
+			continue
+		}
+	}
 }
 
 func (w *Writer) readLoop() {
