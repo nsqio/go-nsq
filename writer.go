@@ -233,6 +233,8 @@ func (w *Writer) connect() error {
 	}
 
 	if frameType == FrameTypeError {
+		log.Printf("ERROR: [%s] IDENTIFY returned error response - %s", w, data)
+		w.close()
 		return errors.New(string(data))
 	}
 
