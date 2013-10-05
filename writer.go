@@ -179,6 +179,7 @@ func (w *Writer) connect() error {
 		return ErrNotConnected
 	}
 
+	log.Printf("[%s] connecting...", w)
 	conn, err := net.DialTimeout("tcp", w.Addr, time.Second*5)
 	if err != nil {
 		log.Printf("ERROR: [%s] failed to dial %s - %s", w, w.Addr, err)
@@ -238,10 +239,8 @@ func (w *Writer) connect() error {
 		return errors.New(string(data))
 	}
 
-	w.wg.Add(1)
+	w.wg.Add(2)
 	go w.readLoop()
-
-	w.wg.Add(1)
 	go w.messageRouter()
 
 	return nil
@@ -254,6 +253,8 @@ func (w *Writer) close() {
 	close(w.closeChan)
 	w.Conn.Close()
 	go func() {
+		// we need to handle this in a goroutine so we don't
+		// block the caller from making progress
 		w.wg.Wait()
 		atomic.StoreInt32(&w.state, StateInit)
 	}()
@@ -322,10 +323,10 @@ func (w *Writer) readLoop() {
 		w.SetReadDeadline(time.Now().Add(w.HeartbeatInterval * 2))
 		resp, err := ReadResponse(rbuf)
 		if err != nil {
-			log.Printf("ERROR: [%s] reading response %s", w, err)
 			if !strings.Contains(err.Error(), "use of closed network connection") {
-				w.close()
+				log.Printf("ERROR: [%s] reading response %s", w, err)
 			}
+			w.close()
 			goto exit
 		}
 		select {
