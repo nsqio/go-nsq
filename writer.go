@@ -49,6 +49,12 @@ type WriterTransaction struct {
 	Args      []interface{} // the slice of variadic arguments passed to PublishAsync or MultiPublishAsync
 }
 
+func (t *WriterTransaction) finish() {
+	if t.doneChan != nil {
+		t.doneChan <- t
+	}
+}
+
 // returned when a publish command is made against a Writer that is not connected
 var ErrNotConnected = errors.New("not connected")
 
@@ -289,8 +295,8 @@ func (w *Writer) messageRouter() {
 			w.transactions = w.transactions[1:]
 			t.FrameType = frameType
 			t.Data = data
-			t.Error = err
-			t.done()
+			t.Error = nil
+			t.finish()
 		case <-w.closeChan:
 			goto exit
 		}
@@ -304,7 +310,7 @@ exit:
 func (w *Writer) transactionCleanup() {
 	for _, t := range w.transactions {
 		t.Error = ErrNotConnected
-		t.done()
+		t.finish()
 	}
 	w.transactions = w.transactions[:0]
 }
@@ -331,10 +337,4 @@ func (w *Writer) readLoop() {
 exit:
 	w.wg.Done()
 	log.Printf("[%s] exiting readLoop()", w)
-}
-
-func (t *WriterTransaction) done() {
-	if t.doneChan != nil {
-		t.doneChan <- t
-	}
 }
