@@ -27,6 +27,8 @@ type Writer struct {
 	ShortIdentifier   string
 	LongIdentifier    string
 
+	concurrentWriters int32
+
 	transactionChan chan *WriterTransaction
 	dataChan        chan []byte
 	transactions    []*WriterTransaction
@@ -47,6 +49,12 @@ type WriterTransaction struct {
 	Data      []byte        // the response data of the publish command
 	Error     error         // the error (or nil) of the publish command
 	Args      []interface{} // the slice of variadic arguments passed to PublishAsync or MultiPublishAsync
+}
+
+func (t *WriterTransaction) finish() {
+	if t.doneChan != nil {
+		t.doneChan <- t
+	}
 }
 
 // returned when a publish command is made against a Writer that is not connected
@@ -144,23 +152,31 @@ func (w *Writer) sendCommand(cmd *Command) (int32, []byte, error) {
 }
 
 func (w *Writer) sendCommandAsync(cmd *Command, doneChan chan *WriterTransaction, args []interface{}) error {
+	// keep track of how many outstanding writers we're dealing with
+	// in order to later ensure that we clean them all up...
+	atomic.AddInt32(&w.concurrentWriters, 1)
+	defer atomic.AddInt32(&w.concurrentWriters, -1)
+
 	if atomic.LoadInt32(&w.state) != StateConnected {
 		err := w.connect()
 		if err != nil {
 			return err
 		}
 	}
+
 	t := &WriterTransaction{
 		cmd:       cmd,
 		doneChan:  doneChan,
 		FrameType: -1,
 		Args:      args,
 	}
+
 	select {
 	case w.transactionChan <- t:
 	case <-w.exitChan:
 		return ErrStopped
 	}
+
 	return nil
 }
 
@@ -170,9 +186,10 @@ func (w *Writer) connect() error {
 	}
 
 	if !atomic.CompareAndSwapInt32(&w.state, StateInit, StateConnected) {
-		return nil
+		return ErrNotConnected
 	}
 
+	log.Printf("[%s] connecting...", w)
 	conn, err := net.DialTimeout("tcp", w.Addr, time.Second*5)
 	if err != nil {
 		log.Printf("ERROR: [%s] failed to dial %s - %s", w, w.Addr, err)
@@ -227,13 +244,13 @@ func (w *Writer) connect() error {
 	}
 
 	if frameType == FrameTypeError {
+		log.Printf("ERROR: [%s] IDENTIFY returned error response - %s", w, data)
+		w.close()
 		return errors.New(string(data))
 	}
 
-	w.wg.Add(1)
+	w.wg.Add(2)
 	go w.readLoop()
-
-	w.wg.Add(1)
 	go w.messageRouter()
 
 	return nil
@@ -246,14 +263,14 @@ func (w *Writer) close() {
 	close(w.closeChan)
 	w.Conn.Close()
 	go func() {
+		// we need to handle this in a goroutine so we don't
+		// block the caller from making progress
 		w.wg.Wait()
 		atomic.StoreInt32(&w.state, StateInit)
 	}()
 }
 
 func (w *Writer) messageRouter() {
-	defer w.transactionCleanup()
-
 	for {
 		select {
 		case t := <-w.transactionChan:
@@ -289,24 +306,45 @@ func (w *Writer) messageRouter() {
 			w.transactions = w.transactions[1:]
 			t.FrameType = frameType
 			t.Data = data
-			t.Error = err
-			t.done()
+			t.Error = nil
+			t.finish()
 		case <-w.closeChan:
 			goto exit
 		}
 	}
 
 exit:
+	w.transactionCleanup()
 	w.wg.Done()
 	log.Printf("[%s] exiting messageRouter()", w)
 }
 
 func (w *Writer) transactionCleanup() {
+	// clean up transactions we can easily account for
 	for _, t := range w.transactions {
 		t.Error = ErrNotConnected
-		t.done()
+		t.finish()
 	}
 	w.transactions = w.transactions[:0]
+
+	// spin and free up any writes that might have raced
+	// with the cleanup process (blocked on writing
+	// to transactionChan)
+	for {
+		select {
+		case t := <-w.transactionChan:
+			t.Error = ErrNotConnected
+			t.finish()
+		default:
+			// keep spinning until there are 0 concurrent writers
+			if atomic.LoadInt32(&w.concurrentWriters) == 0 {
+				return
+			}
+			// give the runtime a chance to schedule other racing goroutines
+			time.Sleep(5 * time.Millisecond)
+			continue
+		}
+	}
 }
 
 func (w *Writer) readLoop() {
@@ -315,10 +353,10 @@ func (w *Writer) readLoop() {
 		w.SetReadDeadline(time.Now().Add(w.HeartbeatInterval * 2))
 		resp, err := ReadResponse(rbuf)
 		if err != nil {
-			log.Printf("ERROR: [%s] reading response %s", w, err)
 			if !strings.Contains(err.Error(), "use of closed network connection") {
-				w.close()
+				log.Printf("ERROR: [%s] reading response %s", w, err)
 			}
+			w.close()
 			goto exit
 		}
 		select {
@@ -331,10 +369,4 @@ func (w *Writer) readLoop() {
 exit:
 	w.wg.Done()
 	log.Printf("[%s] exiting readLoop()", w)
-}
-
-func (t *WriterTransaction) done() {
-	if t.doneChan != nil {
-		t.doneChan <- t
-	}
 }
