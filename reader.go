@@ -1204,7 +1204,7 @@ func (q *Reader) Stop() {
 
 func (q *Reader) stopHandlers() {
 	q.stopHandler.Do(func() {
-		log.Printf("closing incomingMessages")
+		log.Printf("stopping handlers")
 		close(q.incomingMessages)
 	})
 }
@@ -1217,44 +1217,46 @@ func (q *Reader) stopHandlers() {
 // are concurrently executed in goroutines.
 func (q *Reader) AddHandler(handler Handler) {
 	atomic.AddInt32(&q.runningHandlers, 1)
-	log.Println("starting Handler go-routine")
-	go func() {
-		for {
-			message, ok := <-q.incomingMessages
-			if !ok {
-				log.Printf("closing Handler (after self.incomingMessages closed)")
-				if atomic.AddInt32(&q.runningHandlers, -1) == 0 {
-					close(q.ExitChan)
-				}
-				break
-			}
+	go q.syncHandler(handler)
+}
 
-			err := handler.HandleMessage(message.Message)
-			if err != nil {
-				log.Printf("ERROR: handler returned %s for msg %s %s", err.Error(), message.Id, message.Body)
+func (q *Reader) syncHandler(handler Handler) {
+	log.Println("Handler starting")
+	for {
+		message, ok := <-q.incomingMessages
+		if !ok {
+			log.Printf("Handler closing")
+			if atomic.AddInt32(&q.runningHandlers, -1) == 0 {
+				close(q.ExitChan)
 			}
-
-			// message passed the max number of attempts
-			if err != nil && q.MaxAttemptCount > 0 && message.Attempts > q.MaxAttemptCount {
-				log.Printf("WARNING: msg attempted %d times. giving up %s %s", message.Attempts, message.Id, message.Body)
-				logger, ok := handler.(FailedMessageLogger)
-				if ok {
-					logger.LogFailedMessage(message.Message)
-				}
-				message.responseChannel <- &FinishedMessage{message.Id, 0, true}
-				continue
-			}
-
-			// linear delay
-			requeueDelay := q.DefaultRequeueDelay * time.Duration(message.Attempts)
-			// bound the requeueDelay to configured max
-			if requeueDelay > q.MaxRequeueDelay {
-				requeueDelay = q.MaxRequeueDelay
-			}
-
-			message.responseChannel <- &FinishedMessage{message.Id, int(requeueDelay / time.Millisecond), err == nil}
+			break
 		}
-	}()
+
+		finishedMessage := q.checkMessageAttempts(message.Message, handler)
+		if finishedMessage != nil {
+			message.responseChannel <- finishedMessage
+			continue
+		}
+
+		err := handler.HandleMessage(message.Message)
+		if err != nil {
+			log.Printf("ERROR: handler returned %s for msg %s %s",
+				err.Error(), message.Id, message.Body)
+		}
+
+		// linear delay
+		requeueDelay := q.DefaultRequeueDelay * time.Duration(message.Attempts)
+		// bound the requeueDelay to configured max
+		if requeueDelay > q.MaxRequeueDelay {
+			requeueDelay = q.MaxRequeueDelay
+		}
+
+		message.responseChannel <- &FinishedMessage{
+			Id:             message.Id,
+			RequeueDelayMs: int(requeueDelay / time.Millisecond),
+			Success:        err == nil,
+		}
+	}
 }
 
 // AddAsyncHandler adds an AsyncHandler for messages received by this Reader.
@@ -1265,31 +1267,43 @@ func (q *Reader) AddHandler(handler Handler) {
 // are concurrently executed in goroutines.
 func (q *Reader) AddAsyncHandler(handler AsyncHandler) {
 	atomic.AddInt32(&q.runningHandlers, 1)
-	log.Println("starting AsyncHandler go-routine")
-	go func() {
-		for {
-			message, ok := <-q.incomingMessages
-			if !ok {
-				log.Printf("closing AsyncHandler (after self.incomingMessages closed)")
-				if atomic.AddInt32(&q.runningHandlers, -1) == 0 {
-					close(q.ExitChan)
-				}
-				break
-			}
+	go q.asyncHandler(handler)
+}
 
-			// message passed the max number of attempts
-			// note: unfortunately it's not straight forward to do this after passing to async handler, so we don't.
-			if q.MaxAttemptCount > 0 && message.Attempts > q.MaxAttemptCount {
-				log.Printf("WARNING: msg attempted %d times. giving up %s %s", message.Attempts, message.Id, message.Body)
-				logger, ok := handler.(FailedMessageLogger)
-				if ok {
-					logger.LogFailedMessage(message.Message)
-				}
-				message.responseChannel <- &FinishedMessage{message.Id, 0, true}
-				continue
+func (q *Reader) asyncHandler(handler AsyncHandler) {
+	log.Println("AsyncHandler starting")
+	for {
+		message, ok := <-q.incomingMessages
+		if !ok {
+			log.Printf("AsyncHandler closing")
+			if atomic.AddInt32(&q.runningHandlers, -1) == 0 {
+				close(q.ExitChan)
 			}
-
-			handler.HandleMessage(message.Message, message.responseChannel)
+			break
 		}
-	}()
+
+		finishedMessage := q.checkMessageAttempts(message.Message, handler)
+		if finishedMessage != nil {
+			message.responseChannel <- finishedMessage
+			continue
+		}
+
+		handler.HandleMessage(message.Message, message.responseChannel)
+	}
+}
+
+func (q *Reader) checkMessageAttempts(message *Message, handler interface{}) *FinishedMessage {
+	// message passed the max number of attempts
+	if q.MaxAttemptCount > 0 && message.Attempts > q.MaxAttemptCount {
+		log.Printf("WARNING: msg attempted %d times. giving up %s %s",
+			message.Attempts, message.Id, message.Body)
+
+		logger, ok := handler.(FailedMessageLogger)
+		if ok {
+			logger.LogFailedMessage(message)
+		}
+
+		return &FinishedMessage{message.Id, 0, true}
+	}
+	return nil
 }

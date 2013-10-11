@@ -157,7 +157,7 @@ func readerTest(t *testing.T, deflate bool, snappy bool, tlsv1 bool) {
 
 	<-q.ExitChan
 
-	if h.messagesReceived != 9 || h.messagesSent != 4 {
+	if h.messagesReceived != 8 || h.messagesSent != 4 {
 		t.Fatalf("end of test. should have handled a diff number of messages (got %d, sent %d)", h.messagesReceived, h.messagesSent)
 	}
 	if h.messagesFailed != 1 {
