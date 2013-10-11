@@ -101,19 +101,19 @@ type nsqConn struct {
 
 	backoffCounter int32
 	rdyRetryTimer  *time.Timer
+	rdyChan        chan *nsqConn
 
 	finishedMessages chan *FinishedMessage
 	cmdChan          chan *Command
 	dying            chan int
 	drainReady       chan int
-	readyChan        chan int
 	exitChan         chan int
 
 	stopFlag int32
 	stopper  sync.Once
 }
 
-func newNSQConn(addr string, readTimeout time.Duration, writeTimeout time.Duration) (*nsqConn, error) {
+func newNSQConn(rdyChan chan *nsqConn, addr string, readTimeout time.Duration, writeTimeout time.Duration) (*nsqConn, error) {
 	conn, err := net.DialTimeout("tcp", addr, time.Second)
 	if err != nil {
 		return nil, err
@@ -136,7 +136,7 @@ func newNSQConn(addr string, readTimeout time.Duration, writeTimeout time.Durati
 		cmdChan:          make(chan *Command),
 		dying:            make(chan int, 1),
 		drainReady:       make(chan int),
-		readyChan:        make(chan int, 1),
+		rdyChan:          rdyChan,
 		exitChan:         make(chan int),
 	}
 
@@ -247,13 +247,6 @@ func (c *nsqConn) upgradeSnappy() error {
 	return nil
 }
 
-func (c *nsqConn) tryUpdateRDY() {
-	select {
-	case c.readyChan <- 1:
-	default:
-	}
-}
-
 // Reader is a high-level type to consume from NSQ.
 //
 // A Reader instance is supplied handler(s) that will be executed
@@ -270,6 +263,7 @@ type Reader struct {
 	MessagesRequeued uint64 // an atomic counter - # of messages REQueued
 	totalRdyCount    int64
 	messagesInFlight int64
+	backoffDuration  int64
 
 	sync.RWMutex
 
@@ -290,8 +284,9 @@ type Reader struct {
 	LookupdPollJitter   float64       // Maximum fractional amount of jitter to add to the lookupd pool loop. This helps evenly distribute requests even if multiple consumers restart at the same time.
 
 	// requeue delays
-	MaxRequeueDelay     time.Duration // the maximum duration when REQueueing (for doubling backoff)
+	MaxRequeueDelay     time.Duration // the maximum duration when REQueueing (for doubling of deferred requeue)
 	DefaultRequeueDelay time.Duration // the default duration when REQueueing
+	BackoffMultiplier   time.Duration // the unit of time for calculating reader backoff
 
 	// misc
 	MaxAttemptCount   uint16        // maximum number of times this reader will attempt to process a message
@@ -307,18 +302,19 @@ type Reader struct {
 	Snappy       bool // negotiate enabling Snappy compression
 
 	// internal variables
-	redistributeOnce sync.Once
-
-	maxBackoffDuration time.Duration
-	maxBackoffCount    int32
-	maxInFlight        int
+	maxBackoffDuration   time.Duration
+	maxBackoffCount      int32
+	maxInFlight          int
+	backoffChan          chan bool
+	rdyChan              chan *nsqConn
+	needRDYRedistributed int32
+	backoffCounter       int32
 
 	incomingMessages chan *incomingMessage
 
 	pendingConnections map[string]bool
 	nsqConnections     map[string]*nsqConn
 
-	lookupdExitChan    chan int
 	lookupdRecheckChan chan int
 	lookupdHTTPAddrs   []string
 	lookupdQueryIndex  int
@@ -358,6 +354,7 @@ func NewReader(topic string, channel string) (*Reader, error) {
 
 		DefaultRequeueDelay: 90 * time.Second,
 		MaxRequeueDelay:     15 * time.Minute,
+		BackoffMultiplier:   time.Second,
 
 		ShortIdentifier: strings.Split(hostname, ".")[0],
 		LongIdentifier:  hostname,
@@ -372,13 +369,15 @@ func NewReader(topic string, channel string) (*Reader, error) {
 		pendingConnections: make(map[string]bool),
 		nsqConnections:     make(map[string]*nsqConn),
 
-		lookupdExitChan:    make(chan int),
 		lookupdRecheckChan: make(chan int, 1), // used at connection close to force a possible reconnect
 		maxInFlight:        1,
+		backoffChan:        make(chan bool),
+		rdyChan:            make(chan *nsqConn, 1),
 
 		ExitChan: make(chan int),
 	}
 	q.SetMaxBackoffDuration(120 * time.Second)
+	go q.rdyLoop()
 	return q, nil
 }
 
@@ -431,7 +430,7 @@ func (q *Reader) SetMaxInFlight(maxInFlight int) {
 	q.RLock()
 	defer q.RUnlock()
 	for _, c := range q.nsqConnections {
-		c.tryUpdateRDY()
+		c.rdyChan <- c
 	}
 }
 
@@ -485,7 +484,7 @@ func (q *Reader) lookupdLoop() {
 
 	select {
 	case <-time.After(jitter):
-	case <-q.lookupdExitChan:
+	case <-q.ExitChan:
 		goto exit
 	}
 
@@ -495,7 +494,7 @@ func (q *Reader) lookupdLoop() {
 			q.queryLookupd()
 		case <-q.lookupdRecheckChan:
 			q.queryLookupd()
-		case <-q.lookupdExitChan:
+		case <-q.ExitChan:
 			goto exit
 		}
 	}
@@ -586,11 +585,9 @@ func (q *Reader) ConnectToNSQ(addr string) error {
 	}
 	q.RUnlock()
 
-	q.redistributeOnce.Do(func() { go q.redistributeRdyState() })
-
 	log.Printf("[%s] connecting to nsqd", addr)
 
-	connection, err := newNSQConn(addr, q.ReadTimeout, q.WriteTimeout)
+	connection, err := newNSQConn(q.rdyChan, addr, q.ReadTimeout, q.WriteTimeout)
 	if err != nil {
 		return err
 	}
@@ -688,18 +685,17 @@ func (q *Reader) ConnectToNSQ(addr string) error {
 	q.Lock()
 	delete(q.pendingConnections, addr)
 	q.nsqConnections[connection.String()] = connection
-	// signal to existing connections to lower their RDY count
-	for _, c := range q.nsqConnections {
-		c.tryUpdateRDY()
-	}
 	q.Unlock()
+
+	// pre-emptive signal to existing connections to lower their RDY count
+	q.RLock()
+	for _, c := range q.nsqConnections {
+		c.rdyChan <- c
+	}
+	q.RUnlock()
 
 	go q.readLoop(connection)
 	go q.finishLoop(connection)
-	go q.rdyLoop(connection)
-
-	// prime RDY state
-	connection.tryUpdateRDY()
 
 	return nil
 }
@@ -769,7 +765,7 @@ func (q *Reader) readLoop(c *nsqConn) {
 
 			q.incomingMessages <- &incomingMessage{msg, c.finishedMessages}
 
-			c.tryUpdateRDY()
+			c.rdyChan <- c
 		case FrameTypeResponse:
 			switch {
 			case bytes.Equal(data, []byte("CLOSE_WAIT")):
@@ -800,9 +796,6 @@ exit:
 
 func (q *Reader) finishLoop(c *nsqConn) {
 	var buf bytes.Buffer
-	var backoffCounter int32
-	var backoffUpdated bool
-	var backoffDeadline time.Time
 
 	for {
 		select {
@@ -822,7 +815,6 @@ func (q *Reader) finishLoop(c *nsqConn) {
 			// Decrement this here so it is correct even if we can't respond to nsqd
 			atomic.AddInt64(&q.messagesInFlight, -1)
 			atomic.AddInt64(&c.messagesInFlight, -1)
-			now := time.Now()
 
 			if msg.Success {
 				if q.VerboseLogging {
@@ -838,11 +830,6 @@ func (q *Reader) finishLoop(c *nsqConn) {
 
 				atomic.AddUint64(&c.messagesFinished, 1)
 				atomic.AddUint64(&q.MessagesFinished, 1)
-
-				if backoffCounter > 0 && now.After(backoffDeadline) {
-					backoffCounter--
-					backoffUpdated = true
-				}
 			} else {
 				if q.VerboseLogging {
 					log.Printf("[%s] requeuing %s", c, msg.Id)
@@ -857,34 +844,9 @@ func (q *Reader) finishLoop(c *nsqConn) {
 
 				atomic.AddUint64(&c.messagesRequeued, 1)
 				atomic.AddUint64(&q.MessagesRequeued, 1)
-
-				if backoffCounter < q.maxBackoffCount && now.After(backoffDeadline) {
-					backoffCounter++
-					backoffUpdated = true
-				}
 			}
 
-			atomic.StoreInt32(&c.backoffCounter, backoffCounter)
-			// prevent many async failures/successes from immediately resulting in
-			// max backoff/normal rate (by ensuring that we dont continually incr/decr
-			// the counter during a backoff period)
-			if backoffCounter > 0 && backoffUpdated {
-				backoffDuration := q.backoffDuration(backoffCounter)
-				backoffDeadline = now.Add(backoffDuration)
-
-				// going into backoff. set all RDY to 0 immediately
-				q.RLock()
-				for _, c := range q.nsqConnections {
-					if q.VerboseLogging {
-						log.Printf("[%s] in backoff. sending RDY 0", c)
-					}
-					q.updateRDY(c, 0)
-
-					// prime the rdy loop so it starts waiting on the backoff timer (if not already doing so)
-					c.tryUpdateRDY()
-				}
-				q.RUnlock()
-			}
+			q.backoffChan <- msg.Success
 
 			if atomic.LoadInt64(&c.messagesInFlight) == 0 &&
 				(atomic.LoadInt32(&c.stopFlag) == 1 || atomic.LoadInt32(&q.stopFlag) == 1) {
@@ -914,12 +876,30 @@ func (q *Reader) stopFinishLoop(c *nsqConn) {
 		close(c.exitChan)
 		c.Close()
 
-		atomic.AddInt64(&q.totalRdyCount, atomic.LoadInt64(&c.rdyCount)*-1)
-
 		q.Lock()
 		delete(q.nsqConnections, c.String())
 		left := len(q.nsqConnections)
 		q.Unlock()
+
+		// remove this connections RDY count from the reader's total
+		rdyCount := atomic.LoadInt64(&c.rdyCount)
+		atomic.AddInt64(&q.totalRdyCount, -rdyCount)
+
+		if (c.rdyRetryTimer != nil || rdyCount > 0) &&
+			(left == q.MaxInFlight() || q.inBackoff()) {
+			// we're toggling out of (normal) redistribution cases and this conn
+			// had a RDY count...
+			//
+			// trigger RDY redistribution to make sure this RDY is moved
+			// to a new connection
+			atomic.StoreInt32(&q.needRDYRedistributed, 1)
+		}
+
+		// stop any pending retry of an old RDY update
+		if c.rdyRetryTimer != nil {
+			c.rdyRetryTimer.Stop()
+			c.rdyRetryTimer = nil
+		}
 
 		log.Printf("there are %d connections left alive", left)
 
@@ -938,40 +918,51 @@ func (q *Reader) stopFinishLoop(c *nsqConn) {
 	})
 }
 
-func (q *Reader) backoffDuration(count int32) time.Duration {
-	backoffDuration := time.Second * time.Duration(math.Pow(2, float64(count)))
+func (q *Reader) backoffDurationForCount(count int32) time.Duration {
+	backoffDuration := q.BackoffMultiplier * time.Duration(math.Pow(2, float64(count)))
 	if backoffDuration > q.maxBackoffDuration {
 		backoffDuration = q.maxBackoffDuration
 	}
 	return backoffDuration
 }
 
-func (q *Reader) rdyLoop(c *nsqConn) {
-	readyChan := c.readyChan
+func (q *Reader) inBackoff() bool {
+	return atomic.LoadInt32(&q.backoffCounter) > 0
+}
+
+func (q *Reader) inBackoffBlock() bool {
+	return atomic.LoadInt64(&q.backoffDuration) > 0
+}
+
+func (q *Reader) rdyLoop() {
 	var backoffTimer *time.Timer
 	var backoffTimerChan <-chan time.Time
+	var backoffCounter int32
+
+	redistributeTicker := time.NewTicker(5 * time.Second)
 
 	for {
 		select {
 		case <-backoffTimerChan:
-			log.Printf("[%s] backoff time expired, continuing with RDY 1...", c)
-			// while in backoff only ever let 1 message at a time through
-			q.updateRDY(c, 1)
-			readyChan = c.readyChan
-			backoffTimer = nil
-		case <-readyChan:
-			backoffCounter := atomic.LoadInt32(&c.backoffCounter)
-
-			if backoffCounter != 0 && q.maxBackoffDuration != 0 {
-				if backoffTimer != nil {
-					// dont overwrite an existing backoff timer
+			q.RLock()
+			// pick a random connection to test the waters
+			choice := rand.Intn(len(q.nsqConnections))
+			i := 0
+			for _, c := range q.nsqConnections {
+				if i != choice {
+					i++
 					continue
 				}
-				backoffDuration := q.backoffDuration(backoffCounter)
-				backoffTimer = time.NewTimer(backoffDuration)
-				backoffTimerChan = backoffTimer.C
-				readyChan = nil
-				log.Printf("[%s] backing off for %.02f seconds (backoff level %d)", c, backoffDuration.Seconds(), backoffCounter)
+				log.Printf("[%s] backoff time expired, continuing with RDY 1...", c)
+				// while in backoff only ever let 1 message at a time through
+				q.updateRDY(c, 1)
+			}
+			q.RUnlock()
+			backoffTimer = nil
+			backoffTimerChan = nil
+			atomic.StoreInt64(&q.backoffDuration, 0)
+		case c := <-q.rdyChan:
+			if backoffTimer != nil || backoffCounter > 0 {
 				continue
 			}
 
@@ -990,16 +981,79 @@ func (q *Reader) rdyLoop(c *nsqConn) {
 					log.Printf("[%s] skip sending RDY %d (%d remain out of last RDY %d)", c, count, remain, lastRdyCount)
 				}
 			}
-		case <-c.exitChan:
+		case success := <-q.backoffChan:
+			// prevent many async failures/successes from immediately resulting in
+			// max backoff/normal rate (by ensuring that we dont continually incr/decr
+			// the counter during a backoff period)
 			if backoffTimer != nil {
-				backoffTimer.Stop()
+				continue
 			}
+
+			// update backoff state
+			backoffUpdated := false
+			if success {
+				if backoffCounter > 0 {
+					backoffCounter--
+					backoffUpdated = true
+				}
+			} else {
+				if backoffCounter < q.maxBackoffCount {
+					backoffCounter++
+					backoffUpdated = true
+				}
+			}
+
+			if backoffUpdated {
+				atomic.StoreInt32(&q.backoffCounter, backoffCounter)
+			}
+
+			// exit backoff
+			if backoffCounter == 0 && backoffUpdated {
+				q.RLock()
+				count := q.ConnectionMaxInFlight()
+				for _, c := range q.nsqConnections {
+					if q.VerboseLogging {
+						log.Printf("[%s] exiting backoff. returning to RDY %d", c, count)
+					}
+					q.updateRDY(c, count)
+				}
+				q.RUnlock()
+				continue
+			}
+
+			// start or continue backoff
+			if backoffCounter > 0 {
+				backoffDuration := q.backoffDurationForCount(backoffCounter)
+				atomic.StoreInt64(&q.backoffDuration, backoffDuration.Nanoseconds())
+				backoffTimer = time.NewTimer(backoffDuration)
+				backoffTimerChan = backoffTimer.C
+
+				log.Printf("backing off for %.04f seconds (backoff level %d)",
+					backoffDuration.Seconds(), backoffCounter)
+
+				// send RDY 0 immediately (to *all* connections)
+				q.RLock()
+				for _, c := range q.nsqConnections {
+					if q.VerboseLogging {
+						log.Printf("[%s] in backoff. sending RDY 0", c)
+					}
+					q.updateRDY(c, 0)
+				}
+				q.RUnlock()
+			}
+		case <-redistributeTicker.C:
+			q.redistributeRDY()
+		case <-q.ExitChan:
 			goto exit
 		}
 	}
 
 exit:
-	log.Printf("[%s] rdyLoop exiting", c)
+	redistributeTicker.Stop()
+	if backoffTimer != nil {
+		backoffTimer.Stop()
+	}
+	log.Printf("rdyLoop exiting")
 }
 
 func (q *Reader) updateRDY(c *nsqConn, count int64) error {
@@ -1020,13 +1074,14 @@ func (q *Reader) updateRDY(c *nsqConn, count int64) error {
 
 	// never exceed our global max in flight. truncate if possible.
 	// this could help a new connection get partial max-in-flight
-	maxPossibleRdy := int64(q.MaxInFlight()) - atomic.LoadInt64(&q.totalRdyCount) + atomic.LoadInt64(&c.rdyCount)
+	rdyCount := atomic.LoadInt64(&c.rdyCount)
+	maxPossibleRdy := int64(q.MaxInFlight()) - atomic.LoadInt64(&q.totalRdyCount) + rdyCount
 	if maxPossibleRdy > 0 && maxPossibleRdy < count {
 		count = maxPossibleRdy
 	}
 	if maxPossibleRdy <= 0 && count > 0 {
-		if atomic.LoadInt64(&c.rdyCount) == 0 {
-			// we wanted a to exit a zero RDY count but we couldn't send it...
+		if rdyCount == 0 {
+			// we wanted to exit a zero RDY count but we couldn't send it...
 			// in order to prevent eternal starvation we reschedule this attempt
 			// (if any other RDY update succeeds this timer will be stopped)
 			c.rdyRetryTimer = time.AfterFunc(5*time.Second, func() {
@@ -1047,7 +1102,7 @@ func (q *Reader) sendRDY(c *nsqConn, count int64) error {
 		return nil
 	}
 
-	atomic.AddInt64(&q.totalRdyCount, atomic.LoadInt64(&c.rdyCount)*-1+count)
+	atomic.AddInt64(&q.totalRdyCount, -atomic.LoadInt64(&c.rdyCount)+count)
 	atomic.StoreInt64(&c.rdyCount, count)
 	atomic.StoreInt64(&c.lastRdyCount, count)
 	err := c.sendCommand(&buf, Ready(int(count)))
@@ -1058,47 +1113,60 @@ func (q *Reader) sendRDY(c *nsqConn, count int64) error {
 	return nil
 }
 
-func (q *Reader) redistributeRdyState() {
-	for {
-		time.Sleep(5 * time.Second)
-
-		q.RLock()
-		l := len(q.nsqConnections)
-		q.RUnlock()
-
-		maxInFlight := q.MaxInFlight()
-		if l <= maxInFlight {
-			continue
-		}
-
-		log.Printf("redistributing ready state (%d conns > %d max_in_flight)", l, maxInFlight)
-		q.RLock()
-		possibleConns := make([]*nsqConn, 0, len(q.nsqConnections))
-		for _, c := range q.nsqConnections {
-			lastMsgTimestamp := atomic.LoadInt64(&c.lastMsgTimestamp)
-			lastMsgDuration := time.Now().Sub(time.Unix(0, lastMsgTimestamp))
-			rdyCount := atomic.LoadInt64(&c.rdyCount)
-			if q.VerboseLogging {
-				log.Printf("[%s] rdy: %d (last message received %s)", c, rdyCount, lastMsgDuration)
-			}
-			if rdyCount > 0 && lastMsgDuration > q.LowRdyIdleTimeout {
-				log.Printf("[%s] idle connection, giving up RDY count", c)
-				q.updateRDY(c, 0)
-			}
-			possibleConns = append(possibleConns, c)
-		}
-		availableMaxInFlight := int64(maxInFlight) - atomic.LoadInt64(&q.totalRdyCount)
-		for len(possibleConns) > 0 && availableMaxInFlight > 0 {
-			availableMaxInFlight--
-			i := rand.Int() % len(possibleConns)
-			c := possibleConns[i]
-			// delete
-			possibleConns = append(possibleConns[:i], possibleConns[i+1:]...)
-			log.Printf("[%s] redistributing RDY", c)
-			q.updateRDY(c, 1)
-		}
-		q.RUnlock()
+func (q *Reader) redistributeRDY() {
+	if q.inBackoffBlock() {
+		return
 	}
+
+	q.RLock()
+	numConns := len(q.nsqConnections)
+	q.RUnlock()
+	maxInFlight := q.MaxInFlight()
+	if numConns > maxInFlight {
+		log.Printf("redistributing RDY state (%d conns > %d max_in_flight)", numConns, maxInFlight)
+		atomic.StoreInt32(&q.needRDYRedistributed, 1)
+	}
+
+	if q.inBackoff() && numConns > 1 {
+		log.Printf("redistributing RDY state (in backoff and %d conns > 1)", numConns)
+		atomic.StoreInt32(&q.needRDYRedistributed, 1)
+	}
+
+	if !atomic.CompareAndSwapInt32(&q.needRDYRedistributed, 1, 0) {
+		return
+	}
+
+	q.RLock()
+	possibleConns := make([]*nsqConn, 0, len(q.nsqConnections))
+	for _, c := range q.nsqConnections {
+		lastMsgTimestamp := atomic.LoadInt64(&c.lastMsgTimestamp)
+		lastMsgDuration := time.Now().Sub(time.Unix(0, lastMsgTimestamp))
+		rdyCount := atomic.LoadInt64(&c.rdyCount)
+		if q.VerboseLogging {
+			log.Printf("[%s] rdy: %d (last message received %s)", c, rdyCount, lastMsgDuration)
+		}
+		if rdyCount > 0 && lastMsgDuration > q.LowRdyIdleTimeout {
+			log.Printf("[%s] idle connection, giving up RDY count", c)
+			q.updateRDY(c, 0)
+		}
+		possibleConns = append(possibleConns, c)
+	}
+
+	availableMaxInFlight := int64(maxInFlight) - atomic.LoadInt64(&q.totalRdyCount)
+	if q.inBackoff() {
+		availableMaxInFlight = 1 - atomic.LoadInt64(&q.totalRdyCount)
+	}
+
+	for len(possibleConns) > 0 && availableMaxInFlight > 0 {
+		availableMaxInFlight--
+		i := rand.Int() % len(possibleConns)
+		c := possibleConns[i]
+		// delete
+		possibleConns = append(possibleConns[:i], possibleConns[i+1:]...)
+		log.Printf("[%s] redistributing RDY", c)
+		q.updateRDY(c, 1)
+	}
+	q.RUnlock()
 }
 
 // Stop will gracefully stop the Reader
@@ -1132,10 +1200,6 @@ func (q *Reader) Stop() {
 			q.stopHandlers()
 		}()
 	}
-
-	if len(q.lookupdHTTPAddrs) != 0 {
-		q.lookupdExitChan <- 1
-	}
 }
 
 func (q *Reader) stopHandlers() {
@@ -1160,7 +1224,7 @@ func (q *Reader) AddHandler(handler Handler) {
 			if !ok {
 				log.Printf("closing Handler (after self.incomingMessages closed)")
 				if atomic.AddInt32(&q.runningHandlers, -1) == 0 {
-					q.ExitChan <- 1
+					close(q.ExitChan)
 				}
 				break
 			}
@@ -1208,7 +1272,7 @@ func (q *Reader) AddAsyncHandler(handler AsyncHandler) {
 			if !ok {
 				log.Printf("closing AsyncHandler (after self.incomingMessages closed)")
 				if atomic.AddInt32(&q.runningHandlers, -1) == 0 {
-					q.ExitChan <- 1
+					close(q.ExitChan)
 				}
 				break
 			}
