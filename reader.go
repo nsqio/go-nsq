@@ -1195,10 +1195,9 @@ func (q *Reader) Stop() {
 		}
 		q.RUnlock()
 
-		go func() {
-			<-time.After(time.Duration(30) * time.Second)
+		time.AfterFunc(time.Second*30, func() {
 			q.stopHandlers()
-		}()
+		})
 	}
 }
 
