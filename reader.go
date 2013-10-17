@@ -592,7 +592,6 @@ func (q *Reader) readLoop(c *nsqConn) {
 			}
 
 			q.incomingMessages <- &incomingMessage{msg, c.finishedMessages}
-
 			c.rdyChan <- c
 		case FrameTypeResponse:
 			switch {
@@ -629,10 +628,10 @@ func (q *Reader) finishLoop(c *nsqConn) {
 
 	for {
 		select {
-		case <-c.dying:
+		case <-c.exitChan:
 			log.Printf("[%s] breaking out of finish loop", c)
 			// Indicate drainReady because we will not pull any more off finishedMessages
-			c.drainReady <- 1
+			close(c.drainReady)
 			goto exit
 		case cmd := <-c.cmdChan:
 			err := c.sendCommand(&buf, cmd)
@@ -694,8 +693,6 @@ exit:
 func (q *Reader) stopFinishLoop(c *nsqConn) {
 	c.stopper.Do(func() {
 		log.Printf("[%s] beginning stopFinishLoop", c)
-		// This doesn't block because dying has buffer of 1
-		c.dying <- 1
 		close(c.exitChan)
 		c.Close()
 		go q.cleanupConnection(c)
@@ -703,14 +700,35 @@ func (q *Reader) stopFinishLoop(c *nsqConn) {
 }
 
 func (q *Reader) cleanupConnection(c *nsqConn) {
-	// Drain the finishedMessages channel
-	<-c.drainReady
-	for atomic.AddInt64(&c.messagesInFlight, -1) >= 0 {
-		<-c.finishedMessages
-	}
+	drainExitChan := make(chan int)
+
+	go func() {
+		<-c.drainReady
+		// finishLoop has exited, drain any remaining in flight messages
+		for {
+			// we're racing with readLoop which potentially has a message
+			// for handling...
+			//
+			// infinitely loop until the connection's waitgroup is satisfied,
+			// ensuring that both finishLoop and readLoop have exited, at which
+			// point we can be guaranteed that messagesInFlight accurately
+			// represents whatever is left... continue until 0.
+			select {
+			case <-c.finishedMessages:
+				atomic.AddInt64(&c.messagesInFlight, -1)
+			case <-drainExitChan:
+				if atomic.LoadInt64(&c.messagesInFlight) > 0 {
+					continue
+				}
+				log.Printf("[%s] done draining finishedMessages", c)
+				return
+			}
+		}
+	}()
 
 	// this blocks until finishLoop and readLoop have exited
 	c.wg.Wait()
+	close(drainExitChan)
 
 	// remove this connections RDY count from the reader's total
 	rdyCount := atomic.LoadInt64(&c.rdyCount)

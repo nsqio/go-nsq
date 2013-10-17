@@ -45,9 +45,8 @@ type nsqConn struct {
 
 	finishedMessages chan *FinishedMessage
 	cmdChan          chan *Command
-	dying            chan int
-	drainReady       chan int
 	exitChan         chan int
+	drainReady       chan int
 
 	stopFlag int32
 	stopper  sync.Once
@@ -76,10 +75,9 @@ func newNSQConn(rdyChan chan *nsqConn, addr string,
 
 		finishedMessages: make(chan *FinishedMessage),
 		cmdChan:          make(chan *Command),
-		dying:            make(chan int, 1),
-		drainReady:       make(chan int),
 		rdyChan:          rdyChan,
 		exitChan:         make(chan int),
+		drainReady:       make(chan int),
 	}
 
 	_, err = nc.Write(MagicV2)
