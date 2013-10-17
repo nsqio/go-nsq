@@ -51,6 +51,7 @@ type nsqConn struct {
 
 	stopFlag int32
 	stopper  sync.Once
+	wg       sync.WaitGroup
 }
 
 func newNSQConn(rdyChan chan *nsqConn, addr string,

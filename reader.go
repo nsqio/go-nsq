@@ -516,6 +516,7 @@ func (q *Reader) ConnectToNSQ(addr string) error {
 	}
 	q.RUnlock()
 
+	connection.wg.Add(2)
 	go q.readLoop(connection)
 	go q.finishLoop(connection)
 
@@ -619,6 +620,7 @@ func (q *Reader) readLoop(c *nsqConn) {
 	}
 
 exit:
+	c.wg.Done()
 	log.Printf("[%s] readLoop exiting", c)
 }
 
@@ -685,6 +687,7 @@ func (q *Reader) finishLoop(c *nsqConn) {
 	}
 
 exit:
+	c.wg.Done()
 	log.Printf("[%s] finishLoop exiting", c)
 }
 
@@ -693,57 +696,65 @@ func (q *Reader) stopFinishLoop(c *nsqConn) {
 		log.Printf("[%s] beginning stopFinishLoop", c)
 		// This doesn't block because dying has buffer of 1
 		c.dying <- 1
-
-		// Drain the finishedMessages channel
-		go func() {
-			<-c.drainReady
-			for atomic.AddInt64(&c.messagesInFlight, -1) >= 0 {
-				<-c.finishedMessages
-			}
-		}()
 		close(c.exitChan)
 		c.Close()
-
-		q.Lock()
-		delete(q.nsqConnections, c.String())
-		left := len(q.nsqConnections)
-		q.Unlock()
-
-		// remove this connections RDY count from the reader's total
-		rdyCount := atomic.LoadInt64(&c.rdyCount)
-		atomic.AddInt64(&q.totalRdyCount, -rdyCount)
-
-		if (c.rdyRetryTimer != nil || rdyCount > 0) &&
-			(left == q.MaxInFlight() || q.inBackoff()) {
-			// we're toggling out of (normal) redistribution cases and this conn
-			// had a RDY count...
-			//
-			// trigger RDY redistribution to make sure this RDY is moved
-			// to a new connection
-			atomic.StoreInt32(&q.needRDYRedistributed, 1)
-		}
-
-		// stop any pending retry of an old RDY update
-		if c.rdyRetryTimer != nil {
-			c.rdyRetryTimer.Stop()
-			c.rdyRetryTimer = nil
-		}
-
-		log.Printf("there are %d connections left alive", left)
-
-		// ie: we were the last one, and stopping
-		if left == 0 && atomic.LoadInt32(&q.stopFlag) == 1 {
-			q.stopHandlers()
-		}
-
-		if len(q.lookupdHTTPAddrs) != 0 && atomic.LoadInt32(&q.stopFlag) == 0 {
-			// trigger a poll of the lookupd
-			select {
-			case q.lookupdRecheckChan <- 1:
-			default:
-			}
-		}
+		go q.cleanupConnection(c)
 	})
+}
+
+func (q *Reader) cleanupConnection(c *nsqConn) {
+	// Drain the finishedMessages channel
+	<-c.drainReady
+	for atomic.AddInt64(&c.messagesInFlight, -1) >= 0 {
+		<-c.finishedMessages
+	}
+
+	// this blocks until finishLoop and readLoop have exited
+	c.wg.Wait()
+
+	// remove this connections RDY count from the reader's total
+	rdyCount := atomic.LoadInt64(&c.rdyCount)
+	atomic.AddInt64(&q.totalRdyCount, -rdyCount)
+
+	c.Lock()
+	hasRDYRetryTimer := c.rdyRetryTimer != nil
+	if c.rdyRetryTimer != nil {
+		// stop any pending retry of an old RDY update
+		c.rdyRetryTimer.Stop()
+		c.rdyRetryTimer = nil
+	}
+	c.Unlock()
+
+	q.Lock()
+	delete(q.nsqConnections, c.String())
+	left := len(q.nsqConnections)
+	q.Unlock()
+
+	log.Printf("there are %d connections left alive", left)
+
+	if (hasRDYRetryTimer || rdyCount > 0) &&
+		(left == q.MaxInFlight() || q.inBackoff()) {
+		// we're toggling out of (normal) redistribution cases and this conn
+		// had a RDY count...
+		//
+		// trigger RDY redistribution to make sure this RDY is moved
+		// to a new connection
+		atomic.StoreInt32(&q.needRDYRedistributed, 1)
+	}
+
+	// we were the last one (and stopping)
+	if left == 0 && atomic.LoadInt32(&q.stopFlag) == 1 {
+		q.stopHandlers()
+		return
+	}
+
+	if len(q.lookupdHTTPAddrs) != 0 && atomic.LoadInt32(&q.stopFlag) == 0 {
+		// trigger a poll of the lookupd
+		select {
+		case q.lookupdRecheckChan <- 1:
+		default:
+		}
+	}
 }
 
 func (q *Reader) backoffDurationForCount(count int32) time.Duration {
@@ -897,10 +908,12 @@ func (q *Reader) updateRDY(c *nsqConn, count int64) error {
 	}
 
 	// stop any pending retry of an old RDY update
+	c.Lock()
 	if c.rdyRetryTimer != nil {
 		c.rdyRetryTimer.Stop()
 		c.rdyRetryTimer = nil
 	}
+	c.Unlock()
 
 	// never exceed our global max in flight. truncate if possible.
 	// this could help a new connection get partial max-in-flight
@@ -914,9 +927,11 @@ func (q *Reader) updateRDY(c *nsqConn, count int64) error {
 			// we wanted to exit a zero RDY count but we couldn't send it...
 			// in order to prevent eternal starvation we reschedule this attempt
 			// (if any other RDY update succeeds this timer will be stopped)
+			c.Lock()
 			c.rdyRetryTimer = time.AfterFunc(5*time.Second, func() {
 				q.updateRDY(c, count)
 			})
+			c.Unlock()
 		}
 		return ErrOverMaxInFlight
 	}
