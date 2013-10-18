@@ -277,15 +277,19 @@ func (q *Reader) MaxInFlight() int {
 //
 // A goroutine is spawned to handle continual polling.
 func (q *Reader) ConnectToLookupd(addr string) error {
+	q.Lock()
 	for _, x := range q.lookupdHTTPAddrs {
 		if x == addr {
+			q.Unlock()
 			return errors.New("lookupd address already exists")
 		}
 	}
 	q.lookupdHTTPAddrs = append(q.lookupdHTTPAddrs, addr)
+	numLookupd := len(q.lookupdHTTPAddrs)
+	q.Unlock()
 
 	// if this is the first one, kick off the go loop
-	if len(q.lookupdHTTPAddrs) == 1 {
+	if numLookupd == 1 {
 		q.queryLookupd()
 		go q.lookupdLoop()
 	}
@@ -330,8 +334,11 @@ exit:
 //
 // initiate a connection to any new producers that are identified.
 func (q *Reader) queryLookupd() {
+	q.RLock()
 	addr := q.lookupdHTTPAddrs[q.lookupdQueryIndex]
-	q.lookupdQueryIndex = (q.lookupdQueryIndex + 1) % len(q.lookupdHTTPAddrs)
+	num := len(q.lookupdHTTPAddrs)
+	q.RUnlock()
+	q.lookupdQueryIndex = (q.lookupdQueryIndex + 1) % num
 	endpoint := fmt.Sprintf("http://%s/lookup?topic=%s", addr, url.QueryEscape(q.TopicName))
 
 	log.Printf("LOOKUPD: querying %s", endpoint)
@@ -521,7 +528,10 @@ func handleError(q *Reader, c *nsqConn, errMsg string) {
 	log.Printf(errMsg)
 	atomic.StoreInt32(&c.stopFlag, 1)
 
-	if len(q.lookupdHTTPAddrs) == 0 {
+	q.RLock()
+	numLookupd := len(q.lookupdHTTPAddrs)
+	q.RUnlock()
+	if numLookupd == 0 {
 		go func(addr string) {
 			for {
 				log.Printf("[%s] re-connecting in 15 seconds...", addr)
@@ -760,7 +770,10 @@ func (q *Reader) cleanupConnection(c *nsqConn) {
 		return
 	}
 
-	if len(q.lookupdHTTPAddrs) != 0 && atomic.LoadInt32(&q.stopFlag) == 0 {
+	q.RLock()
+	numLookupd := len(q.lookupdHTTPAddrs)
+	q.RUnlock()
+	if numLookupd != 0 && atomic.LoadInt32(&q.stopFlag) == 0 {
 		// trigger a poll of the lookupd
 		select {
 		case q.lookupdRecheckChan <- 1:
