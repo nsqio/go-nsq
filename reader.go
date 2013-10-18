@@ -330,14 +330,8 @@ exit:
 //
 // initiate a connection to any new producers that are identified.
 func (q *Reader) queryLookupd() {
-	i := q.lookupdQueryIndex
-
-	if i >= len(q.lookupdHTTPAddrs) {
-		i = 0
-	}
-	q.lookupdQueryIndex += 1
-
-	addr := q.lookupdHTTPAddrs[i]
+	addr := q.lookupdHTTPAddrs[q.lookupdQueryIndex]
+	q.lookupdQueryIndex = (q.lookupdQueryIndex + 1) % len(q.lookupdHTTPAddrs)
 	endpoint := fmt.Sprintf("http://%s/lookup?topic=%s", addr, url.QueryEscape(q.TopicName))
 
 	log.Printf("LOOKUPD: querying %s", endpoint)
