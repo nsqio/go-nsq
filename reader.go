@@ -260,7 +260,8 @@ func (q *Reader) SetMaxInFlight(maxInFlight int) {
 // SetMaxBackoffDuration sets the maximum duration a connection will backoff from message processing
 func (q *Reader) SetMaxBackoffDuration(duration time.Duration) {
 	q.maxBackoffDuration = duration
-	q.maxBackoffCount = int32(math.Max(1, math.Ceil(math.Log2(duration.Seconds()))))
+	atomic.StoreInt32(&q.maxBackoffCount,
+		int32(math.Max(1, math.Ceil(math.Log2(duration.Seconds())))))
 }
 
 // MaxInFlight returns the configured maximum number of messages to allow in-flight.
@@ -863,7 +864,7 @@ func (q *Reader) rdyLoop() {
 					backoffUpdated = true
 				}
 			} else {
-				if backoffCounter < q.maxBackoffCount {
+				if backoffCounter < atomic.LoadInt32(&q.maxBackoffCount) {
 					backoffCounter++
 					backoffUpdated = true
 				}
