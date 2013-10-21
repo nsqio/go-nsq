@@ -1,5 +1,31 @@
 ## go-nsq Change Log
 
+### 0.3.3 - 2013-10-21
+
+**Upgrading from 0.3.2**: This release requires NSQ binary version `0.2.23+` for compression
+support.
+
+This release contains significant `Reader` refactoring of the RDY handling code paths. The
+motivation is documented in #1 however the commits in #8 identify individual changes. Additionally,
+we eliminated deadlocks during connection cleanup in `Writer`.
+
+As a result, both user-facing APIs should now be considerably more robust and stable. Additionally,
+`Reader` should behave better when backing off.
+
+New Features/Improvements:
+
+ * #9 - ability to ignore publish responses in `Writer`
+ * #12 - `Requeue()` method on `Message`
+ * #6 - `Touch()` method on `Message`
+ * #4 - snappy/deflate feature negotiation
+
+Bug Fixes:
+
+ * #8 - `Reader` RDY handling refactoring (race conditions, deadlocks, consolidation)
+ * #13 - fix `Writer` deadlocks
+ * #10 - stop accessing simplejson internals
+ * #5 - fix `max-in-flight` race condition
+
 ### 0.3.2 - 2013-08-26
 
 **Upgrading from 0.3.1**: This release requires NSQ binary version `0.2.22+` for TLS support.
