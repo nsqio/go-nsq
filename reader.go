@@ -541,7 +541,7 @@ func handleError(q *Reader, c *nsqConn, errMsg string) {
 					break
 				}
 				err := q.ConnectToNSQ(addr)
-				if err != nil {
+				if err != nil && err != ErrAlreadyConnected {
 					log.Printf("ERROR: failed to connect to %s - %s",
 						addr, err.Error())
 					continue
