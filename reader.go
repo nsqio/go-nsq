@@ -705,10 +705,9 @@ func (q *Reader) stopFinishLoop(c *nsqConn) {
 }
 
 func (q *Reader) cleanupConnection(c *nsqConn) {
-	drainExitChan := make(chan int)
-
 	go func() {
 		<-c.drainReady
+		ticker := time.NewTicker(100 * time.Millisecond)
 		// finishLoop has exited, drain any remaining in flight messages
 		for {
 			// we're racing with readLoop which potentially has a message
@@ -718,22 +717,25 @@ func (q *Reader) cleanupConnection(c *nsqConn) {
 			// ensuring that both finishLoop and readLoop have exited, at which
 			// point we can be guaranteed that messagesInFlight accurately
 			// represents whatever is left... continue until 0.
+			var msgsInFlight int64
 			select {
 			case <-c.finishedMessages:
-				atomic.AddInt64(&c.messagesInFlight, -1)
-			case <-drainExitChan:
-				if atomic.LoadInt64(&c.messagesInFlight) > 0 {
-					continue
-				}
-				log.Printf("[%s] done draining finishedMessages", c)
-				return
+				msgsInFlight = atomic.AddInt64(&c.messagesInFlight, -1)
+			case <-ticker.C:
+				msgsInFlight = atomic.LoadInt64(&c.messagesInFlight)
 			}
+			if msgsInFlight > 0 {
+				log.Printf("[%s] draining... waiting for %d messages in flight", c, msgsInFlight)
+				continue
+			}
+			log.Printf("[%s] done draining finishedMessages", c)
+			ticker.Stop()
+			return
 		}
 	}()
 
 	// this blocks until finishLoop and readLoop have exited
 	c.wg.Wait()
-	close(drainExitChan)
 
 	// remove this connections RDY count from the reader's total
 	rdyCount := atomic.LoadInt64(&c.rdyCount)
