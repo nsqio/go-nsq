@@ -46,12 +46,12 @@ type Handler interface {
 //
 //     &FinishedMessage{messageID, requeueDelay, true|false}
 //
-// To the supplied responseChannel to indicate that a message is processed.
+// To the supplied responseChan to indicate that a message is processed.
 type AsyncHandler interface {
-	HandleMessage(message *Message, responseChannel chan *FinishedMessage)
+	HandleMessage(message *Message, responseChan chan *FinishedMessage)
 }
 
-// FinishedMessage is the data type used over responseChannel in AsyncHandlers
+// FinishedMessage is the data type used over responseChan in AsyncHandlers
 type FinishedMessage struct {
 	Id             MessageID
 	RequeueDelayMs int
@@ -63,11 +63,6 @@ type FinishedMessage struct {
 // exceeded the Reader specified MaxAttemptCount)
 type FailedMessageLogger interface {
 	LogFailedMessage(message *Message)
-}
-
-type incomingMessage struct {
-	*Message
-	responseChannel chan *FinishedMessage
 }
 
 // Reader is a high-level type to consume from NSQ.
@@ -133,7 +128,7 @@ type Reader struct {
 	needRDYRedistributed int32
 	backoffCounter       int32
 
-	incomingMessages chan *incomingMessage
+	incomingMessages chan *Message
 
 	pendingConnections map[string]bool
 	nsqConnections     map[string]*nsqConn
@@ -187,7 +182,7 @@ func NewReader(topic string, channel string) (*Reader, error) {
 
 		DeflateLevel: 6,
 
-		incomingMessages: make(chan *incomingMessage),
+		incomingMessages: make(chan *Message),
 
 		pendingConnections: make(map[string]bool),
 		nsqConnections:     make(map[string]*nsqConn),
@@ -576,6 +571,7 @@ func (q *Reader) readLoop(c *nsqConn) {
 		case FrameTypeMessage:
 			msg, err := DecodeMessage(data)
 			msg.cmdChan = c.cmdChan
+			msg.responseChan = c.finishedMessages
 
 			if err != nil {
 				handleError(q, c, fmt.Sprintf("[%s] error (%s) decoding message %s",
@@ -596,7 +592,7 @@ func (q *Reader) readLoop(c *nsqConn) {
 					c, remain, msg.Id, msg.Body)
 			}
 
-			q.incomingMessages <- &incomingMessage{msg, c.finishedMessages}
+			q.incomingMessages <- msg
 			c.rdyChan <- c
 		case FrameTypeResponse:
 			switch {
@@ -1105,13 +1101,13 @@ func (q *Reader) syncHandler(handler Handler) {
 			break
 		}
 
-		finishedMessage := q.checkMessageAttempts(message.Message, handler)
+		finishedMessage := q.checkMessageAttempts(message, handler)
 		if finishedMessage != nil {
-			message.responseChannel <- finishedMessage
+			message.responseChan <- finishedMessage
 			continue
 		}
 
-		err := handler.HandleMessage(message.Message)
+		err := handler.HandleMessage(message)
 		if err != nil {
 			log.Printf("ERROR: handler returned %s for msg %s %s",
 				err.Error(), message.Id, message.Body)
@@ -1124,7 +1120,7 @@ func (q *Reader) syncHandler(handler Handler) {
 			requeueDelay = q.MaxRequeueDelay
 		}
 
-		message.responseChannel <- &FinishedMessage{
+		message.responseChan <- &FinishedMessage{
 			Id:             message.Id,
 			RequeueDelayMs: int(requeueDelay / time.Millisecond),
 			Success:        err == nil,
@@ -1155,13 +1151,13 @@ func (q *Reader) asyncHandler(handler AsyncHandler) {
 			break
 		}
 
-		finishedMessage := q.checkMessageAttempts(message.Message, handler)
+		finishedMessage := q.checkMessageAttempts(message, handler)
 		if finishedMessage != nil {
-			message.responseChannel <- finishedMessage
+			message.responseChan <- finishedMessage
 			continue
 		}
 
-		handler.HandleMessage(message.Message, message.responseChannel)
+		handler.HandleMessage(message, message.responseChan)
 	}
 }
 

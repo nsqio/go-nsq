@@ -21,7 +21,9 @@ type Message struct {
 	Timestamp int64
 	Attempts  uint16
 
-	cmdChan chan *Command
+	exitChan     chan int
+	cmdChan      chan *Command
+	responseChan chan *FinishedMessage
 }
 
 // NewMessage creates a Message, initializes some metadata,
@@ -37,13 +39,21 @@ func NewMessage(id MessageID, body []byte) *Message {
 // Touch sends a TOUCH command to the nsqd which
 // sent this message
 func (m *Message) Touch() {
-	m.cmdChan <- Touch(m.Id)
+	select {
+	case m.cmdChan <- Touch(m.Id):
+	case <-m.exitChan:
+	}
 }
 
 // Requeue sends a REQUEUE command to the nsqd which
 // sent this message, using the supplied delay
 func (m *Message) Requeue(timeoutMs int) {
-	m.cmdChan <- Requeue(m.Id, timeoutMs)
+	finishedMessage := &FinishedMessage{
+		Id:             m.Id,
+		RequeueDelayMs: timeoutMs,
+		Success:        false,
+	}
+	m.responseChan <- finishedMessage
 }
 
 // EncodeBytes serializes the message into a new, returned, []byte
