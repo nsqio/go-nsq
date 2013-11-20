@@ -1,5 +1,23 @@
 ## go-nsq Change Log
 
+### 0.3.4 - 2013-11-19
+
+**Upgrading from 0.3.3**: There are no backward incompatible changes.
+
+This is a bug fix release, notably potential deadlocks in `Message.Requeue()` and `Message.Touch()`
+as well as a potential busy loop cleaning up closed connections with in-flight messages.
+
+New Features/Improvements:
+
+ * #14 - add `Reader.Configure()`
+ * #18 - return an exported error when an `nsqlookupd` address is already configured
+
+Bug Fixes:
+
+ * #15 - dont let `handleError()` loop if already connected
+ * #17 - resolve potential deadlocks on `Message` responders
+ * #16 - eliminate busy loop when draining `finishedMessages`
+
 ### 0.3.3 - 2013-10-21
 
 **Upgrading from 0.3.2**: This release requires NSQ binary version `0.2.23+` for compression
