@@ -292,7 +292,7 @@ func (q *Reader) Configure(option string, value interface{}) error {
 			return errors.New(fmt.Sprintf("invalid %s - %s", option, err))
 		}
 		if v < 0 || v > 1 {
-			return errors.New(fmt.Sprintf("invalid %d ! 0 <= %s <= 1", option, err))
+			return errors.New(fmt.Sprintf("invalid %s ! 0 <= %s <= 1", option, err))
 		}
 		q.LookupdPollJitter = v
 	case "max_requeue_delay":
@@ -358,7 +358,7 @@ func (q *Reader) Configure(option string, value interface{}) error {
 			return errors.New(fmt.Sprintf("invalid %s - %s", option, err))
 		}
 		if v < 1 || v > 9 {
-			return errors.New(fmt.Sprintf("invalid %s ! 1 <= %d <= 9", option, err))
+			return errors.New(fmt.Sprintf("invalid %s ! 1 <= %s <= 9", option, err))
 		}
 		q.DeflateLevel = int(v)
 	case "snappy":
