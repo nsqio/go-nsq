@@ -123,7 +123,8 @@ type Reader struct {
 	DeflateLevel int  // the compression level to negotiate for Deflate
 	Snappy       bool // negotiate enabling Snappy compression
 
-	SampleRate int32 // set the sampleRate of the client's messagePump (requires nsqd 0.2.25+)
+	SampleRate int32  // set the sampleRate of the client's messagePump (requires nsqd 0.2.25+)
+	UserAgent  string // a string identifying the agent for this client in the spirit of HTTP (default: "<client_library_name>/<version>")
 
 	// internal variables
 	maxBackoffDuration   time.Duration
@@ -372,6 +373,8 @@ func (q *Reader) Configure(option string, value interface{}) error {
 			return errors.New(fmt.Sprintf("invalid %s ! 0 <= %d <= 99", option, err))
 		}
 		q.SampleRate = int32(v)
+	case "user_agent":
+		q.UserAgent = value.(string)
 	case "snappy":
 		v, err := getBool(value)
 		if err != nil {
@@ -626,6 +629,12 @@ func (q *Reader) ConnectToNSQ(addr string) error {
 	}
 	q.pendingConnections[addr] = true
 
+	// set the user_agent string to the default if there is no user input version
+	userAgent := fmt.Sprintf("go-nsq/%s", VERSION)
+	if q.UserAgent != "" {
+		userAgent = q.UserAgent
+	}
+
 	ci := make(map[string]interface{})
 	ci["short_id"] = q.ShortIdentifier
 	ci["long_id"] = q.LongIdentifier
@@ -635,6 +644,7 @@ func (q *Reader) ConnectToNSQ(addr string) error {
 	ci["snappy"] = q.Snappy
 	ci["feature_negotiation"] = true
 	ci["sample_rate"] = q.SampleRate
+	ci["user_agent"] = userAgent
 	cmd, err := Identify(ci)
 	if err != nil {
 		cleanupConnection()
