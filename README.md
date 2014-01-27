@@ -2,9 +2,9 @@
 
 `go-nsq` is the official Go package for [NSQ][nsq].
 
-[![Build Status](https://secure.travis-ci.org/bitly/go-nsq.png?branch=master)](http://travis-ci.org/bitly/go-nsq)
-
 The latest stable release is [0.3.4](https://github.com/bitly/go-nsq/releases/tag/v0.3.4).
+
+[![Build Status](https://secure.travis-ci.org/bitly/go-nsq.png?branch=master)](http://travis-ci.org/bitly/go-nsq)
 
 It provides high-level [Reader][reader] and [Writer][writer] types to implement consumers and
 producers as well as low-level functions to communicate over the [NSQ protocol][protocol].
@@ -14,10 +14,6 @@ See the [main repo apps][apps] directory for examples of clients built using thi
 ### Installing
 
     $ go get github.com/bitly/go-nsq
-
-### Importing
-
-    import "github.com/bitly/go-nsq"
 
 ### Docs
 
