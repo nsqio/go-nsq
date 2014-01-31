@@ -196,7 +196,7 @@ func TestWriterHeartbeat(t *testing.T) {
 
 	w := NewWriter("127.0.0.1:4150")
 	defer w.Stop()
-	w.HeartbeatInterval = 1 * time.Millisecond
+	w.HeartbeatInterval = 100 * time.Millisecond
 
 	_, _, err := w.Publish(topicName, []byte("publish_test_case"))
 	if err == nil {
