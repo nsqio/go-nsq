@@ -721,6 +721,8 @@ func (q *Reader) ConnectToNSQ(addr string) error {
 		return fmt.Errorf("[%s] failed to subscribe to %s:%s - %s", connection, q.TopicName, q.ChannelName, err.Error())
 	}
 
+	connection.enableReadBuffering()
+
 	q.Lock()
 	delete(q.pendingConnections, addr)
 	q.nsqConnections[connection.String()] = connection
