@@ -27,6 +27,9 @@ type nsqConn struct {
 
 	sync.Mutex
 
+	topic   string
+	channel string
+
 	net.Conn
 	tlsConn *tls.Conn
 	addr    string
@@ -54,6 +57,7 @@ type nsqConn struct {
 }
 
 func newNSQConn(rdyChan chan *nsqConn, addr string,
+	topic string, channel string,
 	readTimeout time.Duration, writeTimeout time.Duration) (*nsqConn, error) {
 	conn, err := net.DialTimeout("tcp", addr, time.Second)
 	if err != nil {
@@ -64,6 +68,9 @@ func newNSQConn(rdyChan chan *nsqConn, addr string,
 		Conn: conn,
 
 		addr: addr,
+
+		topic:   topic,
+		channel: channel,
 
 		r: conn,
 		w: conn,
@@ -90,7 +97,7 @@ func newNSQConn(rdyChan chan *nsqConn, addr string,
 }
 
 func (c *nsqConn) String() string {
-	return c.addr
+	return fmt.Sprintf("%s/%s/%s", c.addr, c.topic, c.channel)
 }
 
 func (c *nsqConn) Read(p []byte) (int, error) {

@@ -617,7 +617,8 @@ func (q *Reader) ConnectToNSQ(addr string) error {
 
 	log.Printf("[%s] connecting to nsqd", addr)
 
-	connection, err := newNSQConn(q.rdyChan, addr, q.ReadTimeout, q.WriteTimeout)
+	connection, err := newNSQConn(q.rdyChan, addr,
+		q.TopicName, q.ChannelName, q.ReadTimeout, q.WriteTimeout)
 	if err != nil {
 		return err
 	}
@@ -725,7 +726,7 @@ func (q *Reader) ConnectToNSQ(addr string) error {
 
 	q.Lock()
 	delete(q.pendingConnections, addr)
-	q.nsqConnections[connection.String()] = connection
+	q.nsqConnections[addr] = connection
 	q.Unlock()
 
 	// pre-emptive signal to existing connections to lower their RDY count
@@ -969,7 +970,7 @@ func (q *Reader) cleanupConnection(c *nsqConn) {
 	c.Unlock()
 
 	q.Lock()
-	delete(q.nsqConnections, c.String())
+	delete(q.nsqConnections, c.addr)
 	left := len(q.nsqConnections)
 	q.Unlock()
 
