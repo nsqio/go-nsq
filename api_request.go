@@ -3,11 +3,12 @@ package nsq
 import (
 	"errors"
 	"fmt"
-	"github.com/bitly/go-simplejson"
 	"io/ioutil"
 	"net"
 	"net/http"
 	"time"
+
+	"github.com/bitly/go-simplejson"
 )
 
 type deadlinedConn struct {

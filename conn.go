@@ -7,11 +7,12 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"github.com/mreiferson/go-snappystream"
 	"io"
 	"net"
 	"sync"
 	"time"
+
+	"github.com/mreiferson/go-snappystream"
 )
 
 type nsqConn struct {
