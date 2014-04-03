@@ -129,11 +129,13 @@ type Reader struct {
 	// internal variables
 	maxBackoffDuration   time.Duration
 	maxBackoffCount      int32
-	maxInFlight          int
 	backoffChan          chan bool
 	rdyChan              chan *nsqConn
 	needRDYRedistributed int32
 	backoffCounter       int32
+
+	maxInFlightMutex sync.RWMutex
+	maxInFlight      int
 
 	incomingMessages chan *Message
 
@@ -415,11 +417,10 @@ func (q *Reader) Configure(option string, value interface{}) error {
 // This may change dynamically based on the number of connections to nsqd the Reader
 // is responsible for.
 func (q *Reader) ConnectionMaxInFlight() int64 {
-	q.RLock()
-	defer q.RUnlock()
-
 	b := float64(q.MaxInFlight())
+	q.RLock()
 	s := b / float64(len(q.nsqConnections))
+	q.RUnlock()
 	return int64(math.Min(math.Max(1, s), b))
 }
 
@@ -448,13 +449,13 @@ func (q *Reader) SetMaxInFlight(maxInFlight int) {
 		return
 	}
 
-	q.Lock()
-	if q.maxInFlight == maxInFlight {
-		q.Unlock()
+	q.maxInFlightMutex.Lock()
+	if maxInFlight == q.maxInFlight {
+		q.maxInFlightMutex.Unlock()
 		return
 	}
 	q.maxInFlight = maxInFlight
-	q.Unlock()
+	q.maxInFlightMutex.Unlock()
 
 	q.RLock()
 	defer q.RUnlock()
@@ -472,9 +473,10 @@ func (q *Reader) SetMaxBackoffDuration(duration time.Duration) {
 
 // MaxInFlight returns the configured maximum number of messages to allow in-flight.
 func (q *Reader) MaxInFlight() int {
-	q.RLock()
-	defer q.RUnlock()
-	return q.maxInFlight
+	q.maxInFlightMutex.RLock()
+	mif := q.maxInFlight
+	q.maxInFlightMutex.RUnlock()
+	return mif
 }
 
 // ConnectToLookupd adds an nsqlookupd address to the list for this Reader instance.
@@ -1097,8 +1099,8 @@ func (q *Reader) rdyLoop() {
 
 			// exit backoff
 			if backoffCounter == 0 && backoffUpdated {
-				q.RLock()
 				count := q.ConnectionMaxInFlight()
+				q.RLock()
 				for _, c := range q.nsqConnections {
 					if q.VerboseLogging {
 						log.Printf("[%s] exiting backoff. returning to RDY %d", c, count)
