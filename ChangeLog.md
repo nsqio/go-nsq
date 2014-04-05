@@ -1,5 +1,27 @@
 ## go-nsq Change Log
 
+### 0.3.5 - 2014-04-05
+
+**Upgrading from 0.3.4**: There are no backward incompatible changes.
+
+This release includes a few new features such as support for channel
+sampling and sending along a user agent string (which is now displayed
+in `nsqadmin`).
+
+Also, a critical bug fix for potential deadlocks (thanks @kjk
+for reporting and help testing).
+
+New Features/Improvements:
+
+ * #27 - reader logs disambiguate topic/channel
+ * #22 - channel sampling
+ * #23 - user agent
+
+Bug Fixes:
+
+ * #24 - fix racey reader IDENTIFY buffering
+ * #29 - fix recursive RLock deadlocks
+
 ### 0.3.4 - 2013-11-19
 
 **Upgrading from 0.3.3**: There are no backward incompatible changes.
