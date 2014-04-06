@@ -1,7 +1,6 @@
 package nsq
 
 import (
-	"crypto/tls"
 	"errors"
 	"log"
 	"sync"
@@ -15,37 +14,15 @@ import (
 // and will lazily connect to that instance (and re-connect)
 // when Publish commands are executed.
 type Writer struct {
-	Addr string
-	conn *Conn
+	addr   string
+	conn   *Conn
+	config *Config
 
 	responseChan  chan []byte
 	errorChan     chan []byte
 	ioErrorChan   chan error
 	heartbeatChan chan int
 	closeChan     chan int
-
-	// network deadlines
-	ReadTimeout  time.Duration // the deadline set for network reads
-	WriteTimeout time.Duration // the deadline set for network writes
-
-	ShortIdentifier string // an identifier to send to nsqd when connecting (defaults: short hostname)
-	LongIdentifier  string // an identifier to send to nsqd when connecting (defaults: long hostname)
-
-	HeartbeatInterval time.Duration // duration of time between heartbeats
-	UserAgent         string        // a string identifying the agent for this client in the spirit of HTTP (default: "<client_library_name>/<version>")
-
-	// transport layer security
-	TLSv1     bool        // negotiate enabling TLS
-	TLSConfig *tls.Config // client TLS configuration
-
-	// compression
-	Deflate      bool // negotiate enabling Deflate compression
-	DeflateLevel int  // the compression level to negotiate for Deflate
-	Snappy       bool // negotiate enabling Snappy compression
-
-	// output buffering
-	OutputBufferSize    int64         // size of the buffer (in bytes) used by nsqd for buffering writes to this connection
-	OutputBufferTimeout time.Duration // timeout (in ms) used by nsqd before flushing buffered writes (set to 0 to disable). Warning: configuring clients with an extremely low (< 25ms) output_buffer_timeout has a significant effect on nsqd CPU usage (particularly with > 50 clients connected).
 
 	concurrentWriters int32
 
@@ -82,9 +59,10 @@ var ErrNotConnected = errors.New("not connected")
 var ErrStopped = errors.New("stopped")
 
 // NewWriter returns an instance of Writer for the specified address
-func NewWriter(addr string) *Writer {
+func NewWriter(addr string, config *Config) *Writer {
 	return &Writer{
-		Addr: addr,
+		addr:   addr,
+		config: config,
 
 		transactionChan: make(chan *WriterTransaction),
 		exitChan:        make(chan int),
@@ -98,7 +76,7 @@ func NewWriter(addr string) *Writer {
 
 // String returns the address of the Writer
 func (w *Writer) String() string {
-	return w.Addr
+	return w.addr
 }
 
 // Stop disconnects and permanently stops the Writer
@@ -207,58 +185,12 @@ func (w *Writer) connect() error {
 
 	log.Printf("[%s] connecting...", w)
 
-	conn := NewConn(w.Addr, "", "")
-	if w.ReadTimeout > 0 {
-		conn.ReadTimeout = w.ReadTimeout
-	}
-	if w.WriteTimeout > 0 {
-		conn.WriteTimeout = w.WriteTimeout
-	}
-	conn.Deflate = w.Deflate
-	if w.DeflateLevel > 0 {
-		conn.DeflateLevel = w.DeflateLevel
-	}
-	conn.Snappy = w.Snappy
-	conn.TLSv1 = w.TLSv1
-	conn.TLSConfig = w.TLSConfig
-	if w.ShortIdentifier != "" {
-		conn.ShortIdentifier = w.ShortIdentifier
-	}
-	if w.LongIdentifier != "" {
-		conn.LongIdentifier = w.LongIdentifier
-	}
-	if w.HeartbeatInterval != 0 {
-		conn.HeartbeatInterval = w.HeartbeatInterval
-	}
-	if w.OutputBufferSize != 0 {
-		conn.OutputBufferSize = w.OutputBufferSize
-	}
-	if w.OutputBufferTimeout != 0 {
-		conn.OutputBufferTimeout = w.OutputBufferTimeout
-	}
-	if w.UserAgent != "" {
-		conn.UserAgent = w.UserAgent
-	}
-
-	conn.ResponseCB = func(c *Conn, data []byte) {
-		w.responseChan <- data
-	}
-
-	conn.ErrorCB = func(c *Conn, data []byte) {
-		w.errorChan <- data
-	}
-
-	conn.HeartbeatCB = func(c *Conn) {
-		w.heartbeatChan <- 1
-	}
-
-	conn.IOErrorCB = func(c *Conn, err error) {
-		w.ioErrorChan <- err
-	}
-
-	conn.CloseCB = func(c *Conn) {
-		w.closeChan <- 1
-	}
+	conn := NewConn(w.addr, "", "", w.config)
+	conn.ResponseCB = func(c *Conn, data []byte) { w.responseChan <- data }
+	conn.ErrorCB = func(c *Conn, data []byte) { w.errorChan <- data }
+	conn.HeartbeatCB = func(c *Conn) { w.heartbeatChan <- 1 }
+	conn.IOErrorCB = func(c *Conn, err error) { w.ioErrorChan <- err }
+	conn.CloseCB = func(c *Conn) { w.closeChan <- 1 }
 
 	resp, err := conn.Connect()
 	if err != nil {

@@ -2,7 +2,6 @@ package nsq
 
 import (
 	"bytes"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"log"
@@ -75,59 +74,14 @@ type Reader struct {
 
 	sync.RWMutex
 
-	// basics
-	TopicName      string   // name of topic to subscribe to
-	ChannelName    string   // name of channel to subscribe to
-	VerboseLogging bool     // enable verbose logging
-	ExitChan       chan int // read from this channel to block your main loop
+	topic   string
+	channel string
+	config  *Config
 
-	// network deadlines
-	ReadTimeout  time.Duration // the deadline set for network reads
-	WriteTimeout time.Duration // the deadline set for network writes
-
-	// lookupd
-	LookupdPollInterval time.Duration // duration between polling lookupd for new connections
-	LookupdPollJitter   float64       // Maximum fractional amount of jitter to add to the lookupd pool loop. This helps evenly distribute requests even if multiple consumers restart at the same time.
-
-	// requeue delays
-	MaxRequeueDelay     time.Duration // the maximum duration when REQueueing (for doubling of deferred requeue)
-	DefaultRequeueDelay time.Duration // the default duration when REQueueing
-	BackoffMultiplier   time.Duration // the unit of time for calculating reader backoff
-
-	// misc
-	MaxAttemptCount   uint16        // maximum number of times this reader will attempt to process a message
-	LowRdyIdleTimeout time.Duration // the amount of time in seconds to wait for a message from a producer when in a state where RDY counts are re-distributed (ie. max_in_flight < num_producers)
-
-	ShortIdentifier string // an identifier to send to nsqd when connecting (defaults: short hostname)
-	LongIdentifier  string // an identifier to send to nsqd when connecting (defaults: long hostname)
-
-	HeartbeatInterval time.Duration // duration of time between heartbeats
-	SampleRate        int32         // set the sampleRate of the client's messagePump (requires nsqd 0.2.25+)
-	UserAgent         string        // a string identifying the agent for this client in the spirit of HTTP (default: "<client_library_name>/<version>")
-
-	// transport layer security
-	TLSv1     bool        // negotiate enabling TLS
-	TLSConfig *tls.Config // client TLS configuration
-
-	// compression
-	Deflate      bool // negotiate enabling Deflate compression
-	DeflateLevel int  // the compression level to negotiate for Deflate
-	Snappy       bool // negotiate enabling Snappy compression
-
-	// output buffering
-	OutputBufferSize    int64         // size of the buffer (in bytes) used by nsqd for buffering writes to this connection
-	OutputBufferTimeout time.Duration // timeout (in ms) used by nsqd before flushing buffered writes (set to 0 to disable). Warning: configuring clients with an extremely low (< 25ms) output_buffer_timeout has a significant effect on nsqd CPU usage (particularly with > 50 clients connected).
-
-	// internal variables
-	maxBackoffDuration   time.Duration
-	maxBackoffCount      int32
 	backoffChan          chan bool
 	rdyChan              chan *Conn
 	needRDYRedistributed int32
 	backoffCounter       int32
-
-	maxInFlightMutex sync.RWMutex
-	maxInFlight      int
 
 	incomingMessages chan *Message
 
@@ -135,6 +89,7 @@ type Reader struct {
 	pendingConnections map[string]bool
 	connections        map[string]*Conn
 
+	// used at connection close to force a possible reconnect
 	lookupdRecheckChan chan int
 	lookupdHTTPAddrs   []string
 	lookupdQueryIndex  int
@@ -142,13 +97,16 @@ type Reader struct {
 	runningHandlers int32
 	stopFlag        int32
 	stopHandler     sync.Once
+
+	// read from this channel to ensure clean exit
+	ExitChan chan int
 }
 
 // NewReader creates a new instance of Reader for the specified topic/channel
 //
 // The returned Reader instance is setup with sane default values.  To modify
 // configuration, update the values on the returned instance before connecting.
-func NewReader(topic string, channel string) (*Reader, error) {
+func NewReader(topic string, channel string, config *Config) (*Reader, error) {
 	if !IsValidTopicName(topic) {
 		return nil, errors.New("invalid topic name")
 	}
@@ -158,22 +116,9 @@ func NewReader(topic string, channel string) (*Reader, error) {
 	}
 
 	q := &Reader{
-		TopicName:   topic,
-		ChannelName: channel,
-
-		MaxAttemptCount: 5,
-
-		LookupdPollInterval: 60 * time.Second,
-		LookupdPollJitter:   0.3,
-
-		LowRdyIdleTimeout: 10 * time.Second,
-
-		DefaultRequeueDelay: 90 * time.Second,
-		MaxRequeueDelay:     15 * time.Minute,
-		BackoffMultiplier:   time.Second,
-
-		ReadTimeout:  DefaultClientTimeout,
-		WriteTimeout: time.Second,
+		topic:   topic,
+		channel: channel,
+		config:  config,
 
 		incomingMessages: make(chan *Message),
 
@@ -181,14 +126,12 @@ func NewReader(topic string, channel string) (*Reader, error) {
 		pendingConnections: make(map[string]bool),
 		connections:        make(map[string]*Conn),
 
-		lookupdRecheckChan: make(chan int, 1), // used at connection close to force a possible reconnect
-		maxInFlight:        1,
+		lookupdRecheckChan: make(chan int, 1),
 		backoffChan:        make(chan bool),
 		rdyChan:            make(chan *Conn, 1),
 
 		ExitChan: make(chan int),
 	}
-	q.SetMaxBackoffDuration(120 * time.Second)
 	go q.rdyLoop()
 	return q, nil
 }
@@ -208,7 +151,7 @@ func (q *Reader) conns() []*Conn {
 // This may change dynamically based on the number of connections to nsqd the Reader
 // is responsible for.
 func (q *Reader) ConnectionMaxInFlight() int64 {
-	b := float64(q.MaxInFlight())
+	b := float64(q.maxInFlight())
 	s := b / float64(len(q.conns()))
 	return int64(math.Min(math.Max(1, s), b))
 }
@@ -226,40 +169,10 @@ func (q *Reader) IsStarved() bool {
 	return false
 }
 
-// SetMaxInFlight sets the maximum number of messages this reader instance
-// will allow in-flight.
-//
-// If already connected, it updates the reader RDY state for each connection.
-func (q *Reader) SetMaxInFlight(maxInFlight int) {
-	if atomic.LoadInt32(&q.stopFlag) == 1 {
-		return
-	}
-
-	q.maxInFlightMutex.Lock()
-	if maxInFlight == q.maxInFlight {
-		q.maxInFlightMutex.Unlock()
-		return
-	}
-	q.maxInFlight = maxInFlight
-	q.maxInFlightMutex.Unlock()
-
-	for _, c := range q.conns() {
-		q.rdyChan <- c
-	}
-}
-
-// SetMaxBackoffDuration sets the maximum duration a connection will backoff from message processing
-func (q *Reader) SetMaxBackoffDuration(duration time.Duration) {
-	q.maxBackoffDuration = duration
-	atomic.StoreInt32(&q.maxBackoffCount,
-		int32(math.Max(1, math.Ceil(math.Log2(duration.Seconds())))))
-}
-
-// MaxInFlight returns the configured maximum number of messages to allow in-flight.
-func (q *Reader) MaxInFlight() int {
-	q.maxInFlightMutex.RLock()
-	mif := q.maxInFlight
-	q.maxInFlightMutex.RUnlock()
+func (q *Reader) maxInFlight() int {
+	q.config.RLock()
+	mif := q.config.maxInFlight
+	q.config.RUnlock()
 	return mif
 }
 
@@ -296,8 +209,9 @@ func (q *Reader) lookupdLoop() {
 	// when restarted at the same time, dont all connect at once.
 	rand.Seed(time.Now().UnixNano())
 
-	jitter := time.Duration(int64(rand.Float64() * q.LookupdPollJitter * float64(q.LookupdPollInterval)))
-	ticker := time.NewTicker(q.LookupdPollInterval)
+	jitter := time.Duration(int64(rand.Float64() * 
+		q.config.lookupdPollJitter * float64(q.config.lookupdPollInterval)))
+	ticker := time.NewTicker(q.config.lookupdPollInterval)
 
 	select {
 	case <-time.After(jitter):
@@ -332,7 +246,7 @@ func (q *Reader) queryLookupd() {
 	num := len(q.lookupdHTTPAddrs)
 	q.RUnlock()
 	q.lookupdQueryIndex = (q.lookupdQueryIndex + 1) % num
-	endpoint := fmt.Sprintf("http://%s/lookup?topic=%s", addr, url.QueryEscape(q.TopicName))
+	endpoint := fmt.Sprintf("http://%s/lookup?topic=%s", addr, url.QueryEscape(q.topic))
 
 	log.Printf("LOOKUPD: querying %s", endpoint)
 
@@ -401,41 +315,7 @@ func (q *Reader) ConnectToNSQ(addr string) error {
 
 	log.Printf("[%s] connecting to nsqd", addr)
 
-	conn := NewConn(addr, q.TopicName, q.ChannelName)
-	if q.ReadTimeout > 0 {
-		conn.ReadTimeout = q.ReadTimeout
-	}
-	if q.WriteTimeout > 0 {
-		conn.WriteTimeout = q.WriteTimeout
-	}
-	conn.Deflate = q.Deflate
-	if q.DeflateLevel > 0 {
-		conn.DeflateLevel = q.DeflateLevel
-	}
-	conn.Snappy = q.Snappy
-	conn.TLSv1 = q.TLSv1
-	conn.TLSConfig = q.TLSConfig
-	if q.ShortIdentifier != "" {
-		conn.ShortIdentifier = q.ShortIdentifier
-	}
-	if q.LongIdentifier != "" {
-		conn.LongIdentifier = q.LongIdentifier
-	}
-	if q.HeartbeatInterval != 0 {
-		conn.HeartbeatInterval = q.HeartbeatInterval
-	}
-	if q.SampleRate > 0 {
-		conn.SampleRate = q.SampleRate
-	}
-	if q.UserAgent != "" {
-		conn.UserAgent = q.UserAgent
-	}
-	if q.OutputBufferSize != 0 {
-		conn.OutputBufferSize = q.OutputBufferSize
-	}
-	if q.OutputBufferTimeout != 0 {
-		conn.OutputBufferTimeout = q.OutputBufferTimeout
-	}
+	conn := NewConn(addr, q.topic, q.channel, q.config)
 	conn.MessageCB = func(c *Conn, msg *Message) {
 		q.onConnectionMessage(c, msg)
 	}
@@ -475,9 +355,9 @@ func (q *Reader) ConnectToNSQ(addr string) error {
 
 	if resp != nil {
 		log.Printf("[%s] IDENTIFY response: %+v", conn, resp)
-		if resp.MaxRdyCount < int64(q.MaxInFlight()) {
+		if resp.MaxRdyCount < int64(q.maxInFlight()) {
 			log.Printf("[%s] max RDY count %d < reader max in flight %d, truncation possible",
-				conn, resp.MaxRdyCount, q.MaxInFlight())
+				conn, resp.MaxRdyCount, q.maxInFlight())
 		}
 		if resp.TLSv1 {
 			log.Printf("[%s] upgrading to TLS", conn)
@@ -490,12 +370,12 @@ func (q *Reader) ConnectToNSQ(addr string) error {
 		}
 	}
 
-	cmd := Subscribe(q.TopicName, q.ChannelName)
+	cmd := Subscribe(q.topic, q.channel)
 	err = conn.SendCommand(cmd)
 	if err != nil {
 		cleanupConnection()
 		return fmt.Errorf("[%s] failed to subscribe to %s:%s - %s",
-			conn, q.TopicName, q.ChannelName, err.Error())
+			conn, q.topic, q.channel, err.Error())
 	}
 
 	delete(q.pendingConnections, addr)
@@ -520,12 +400,12 @@ func (q *Reader) onConnectionMessage(c *Conn, msg *Message) {
 
 func (q *Reader) onConnectionMessageProcessed(c *Conn, finishedMsg *FinishedMessage) {
 	if finishedMsg.Success {
-		if q.VerboseLogging {
+		if q.config.verbose {
 			log.Printf("[%s] finishing %s", c, finishedMsg.Id)
 		}
 		atomic.AddUint64(&q.MessagesFinished, 1)
 	} else {
-		if q.VerboseLogging {
+		if q.config.verbose {
 			log.Printf("[%s] requeuing %s", c, finishedMsg.Id)
 		}
 		atomic.AddUint64(&q.MessagesRequeued, 1)
@@ -581,7 +461,7 @@ func (q *Reader) onConnectionClosed(c *Conn) {
 	log.Printf("there are %d connections left alive", left)
 
 	if (hasRDYRetryTimer || rdyCount > 0) &&
-		(left == q.MaxInFlight() || q.inBackoff()) {
+		(left == q.maxInFlight() || q.inBackoff()) {
 		// we're toggling out of (normal) redistribution cases and this conn
 		// had a RDY count...
 		//
@@ -627,9 +507,10 @@ func (q *Reader) onConnectionClosed(c *Conn) {
 }
 
 func (q *Reader) backoffDurationForCount(count int32) time.Duration {
-	backoffDuration := q.BackoffMultiplier * time.Duration(math.Pow(2, float64(count)))
-	if backoffDuration > q.maxBackoffDuration {
-		backoffDuration = q.maxBackoffDuration
+	backoffDuration := q.config.backoffMultiplier *
+		time.Duration(math.Pow(2, float64(count)))
+	if backoffDuration > q.config.maxBackoffDuration {
+		backoffDuration = q.config.maxBackoffDuration
 	}
 	return backoffDuration
 }
@@ -687,13 +568,13 @@ func (q *Reader) rdyLoop() {
 			count := q.ConnectionMaxInFlight()
 			// refill when at 1, or at 25%, or if connections have changed and we have too many RDY
 			if remain <= 1 || remain < (lastRdyCount/4) || (count > 0 && count < remain) {
-				if q.VerboseLogging {
+				if q.config.verbose {
 					log.Printf("[%s] sending RDY %d (%d remain from last RDY %d)",
 						c, count, remain, lastRdyCount)
 				}
 				q.updateRDY(c, count)
 			} else {
-				if q.VerboseLogging {
+				if q.config.verbose {
 					log.Printf("[%s] skip sending RDY %d (%d remain out of last RDY %d)",
 						c, count, remain, lastRdyCount)
 				}
@@ -714,7 +595,9 @@ func (q *Reader) rdyLoop() {
 					backoffUpdated = true
 				}
 			} else {
-				if backoffCounter < atomic.LoadInt32(&q.maxBackoffCount) {
+				maxBackoffCount := int32(math.Max(1, math.Ceil(
+					math.Log2(q.config.maxBackoffDuration.Seconds()))))
+				if backoffCounter < maxBackoffCount {
 					backoffCounter++
 					backoffUpdated = true
 				}
@@ -728,7 +611,7 @@ func (q *Reader) rdyLoop() {
 			if backoffCounter == 0 && backoffUpdated {
 				count := q.ConnectionMaxInFlight()
 				for _, c := range q.conns() {
-					if q.VerboseLogging {
+					if q.config.verbose {
 						log.Printf("[%s] exiting backoff. returning to RDY %d", c, count)
 					}
 					q.updateRDY(c, count)
@@ -748,7 +631,7 @@ func (q *Reader) rdyLoop() {
 
 				// send RDY 0 immediately (to *all* connections)
 				for _, c := range q.conns() {
-					if q.VerboseLogging {
+					if q.config.verbose {
 						log.Printf("[%s] in backoff. sending RDY 0", c)
 					}
 					q.updateRDY(c, 0)
@@ -790,7 +673,7 @@ func (q *Reader) updateRDY(c *Conn, count int64) error {
 	// never exceed our global max in flight. truncate if possible.
 	// this could help a new connection get partial max-in-flight
 	rdyCount := c.RDY()
-	maxPossibleRdy := int64(q.MaxInFlight()) - atomic.LoadInt64(&q.totalRdyCount) + rdyCount
+	maxPossibleRdy := int64(q.maxInFlight()) - atomic.LoadInt64(&q.totalRdyCount) + rdyCount
 	if maxPossibleRdy > 0 && maxPossibleRdy < count {
 		count = maxPossibleRdy
 	}
@@ -835,7 +718,7 @@ func (q *Reader) redistributeRDY() {
 	}
 
 	numConns := len(q.conns())
-	maxInFlight := q.MaxInFlight()
+	maxInFlight := q.maxInFlight()
 	if numConns > maxInFlight {
 		log.Printf("redistributing RDY state (%d conns > %d max_in_flight)",
 			numConns, maxInFlight)
@@ -856,11 +739,11 @@ func (q *Reader) redistributeRDY() {
 	for _, c := range conns {
 		lastMsgDuration := time.Now().Sub(c.LastMessageTime())
 		rdyCount := c.RDY()
-		if q.VerboseLogging {
+		if q.config.verbose {
 			log.Printf("[%s] rdy: %d (last message received %s)",
 				c, rdyCount, lastMsgDuration)
 		}
-		if rdyCount > 0 && lastMsgDuration > q.LowRdyIdleTimeout {
+		if rdyCount > 0 && lastMsgDuration > q.config.lowRdyIdleTimeout {
 			log.Printf("[%s] idle connection, giving up RDY count", c)
 			q.updateRDY(c, 0)
 		}
@@ -951,10 +834,10 @@ func (q *Reader) syncHandler(handler Handler) {
 		}
 
 		// linear delay
-		requeueDelay := q.DefaultRequeueDelay * time.Duration(message.Attempts)
+		requeueDelay := q.config.defaultRequeueDelay * time.Duration(message.Attempts)
 		// bound the requeueDelay to configured max
-		if requeueDelay > q.MaxRequeueDelay {
-			requeueDelay = q.MaxRequeueDelay
+		if requeueDelay > q.config.maxRequeueDelay {
+			requeueDelay = q.config.maxRequeueDelay
 		}
 
 		message.responseChan <- &FinishedMessage{
@@ -1000,7 +883,7 @@ func (q *Reader) asyncHandler(handler AsyncHandler) {
 
 func (q *Reader) checkMessageAttempts(message *Message, handler interface{}) *FinishedMessage {
 	// message passed the max number of attempts
-	if q.MaxAttemptCount > 0 && message.Attempts > q.MaxAttemptCount {
+	if q.config.maxAttempts > 0 && message.Attempts > q.config.maxAttempts {
 		log.Printf("WARNING: msg attempted %d times. giving up %s %s",
 			message.Attempts, message.Id, message.Body)
 

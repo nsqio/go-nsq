@@ -11,8 +11,6 @@ import (
 	"io"
 	"log"
 	"net"
-	"os"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -45,6 +43,7 @@ type Conn struct {
 
 	topic   string
 	channel string
+	config  *Config
 
 	net.Conn
 	tlsConn *tls.Conn
@@ -85,9 +84,6 @@ type Conn struct {
 
 	flateWriter *flate.Writer
 
-	ReadTimeout  time.Duration
-	WriteTimeout time.Duration
-
 	backoffCounter int32
 	rdyRetryTimer  *time.Timer
 
@@ -95,26 +91,6 @@ type Conn struct {
 	cmdChan          chan *Command
 	exitChan         chan int
 	drainReady       chan int
-
-	ShortIdentifier string // an identifier to send to nsqd when connecting (defaults: short hostname)
-	LongIdentifier  string // an identifier to send to nsqd when connecting (defaults: long hostname)
-
-	HeartbeatInterval time.Duration // duration of time between heartbeats
-	SampleRate        int32         // set the sampleRate of the client's messagePump (requires nsqd 0.2.25+)
-	UserAgent         string        // a string identifying the agent for this client in the spirit of HTTP (default: "<client_library_name>/<version>")
-
-	// transport layer security
-	TLSv1     bool        // negotiate enabling TLS
-	TLSConfig *tls.Config // client TLS configuration
-
-	// compression
-	Deflate      bool // negotiate enabling Deflate compression
-	DeflateLevel int  // the compression level to negotiate for Deflate
-	Snappy       bool // negotiate enabling Snappy compression
-
-	// output buffering
-	OutputBufferSize    int64         // size of the buffer (in bytes) used by nsqd for buffering writes to this connection
-	OutputBufferTimeout time.Duration // timeout (in ms) used by nsqd before flushing buffered writes (set to 0 to disable). Warning: configuring clients with an extremely low (< 25ms) output_buffer_timeout has a significant effect on nsqd CPU usage (particularly with > 50 clients connected).
 
 	stopFlag int32
 	stopper  sync.Once
@@ -124,19 +100,13 @@ type Conn struct {
 }
 
 // NewConn returns a new Conn instance
-func NewConn(addr string, topic string, channel string) *Conn {
-	hostname, err := os.Hostname()
-	if err != nil {
-		log.Fatalf("ERROR: unable to get hostname %s", err.Error())
-	}
+func NewConn(addr string, topic string, channel string, config *Config) *Conn {
 	return &Conn{
 		addr: addr,
 
 		topic:   topic,
 		channel: channel,
-
-		ReadTimeout:  DefaultClientTimeout,
-		WriteTimeout: time.Second,
+		config:  config,
 
 		maxRdyCount:      2500,
 		lastMsgTimestamp: time.Now().UnixNano(),
@@ -145,17 +115,6 @@ func NewConn(addr string, topic string, channel string) *Conn {
 		cmdChan:          make(chan *Command),
 		exitChan:         make(chan int),
 		drainReady:       make(chan int),
-
-		ShortIdentifier: strings.Split(hostname, ".")[0],
-		LongIdentifier:  hostname,
-
-		DeflateLevel:        6,
-		OutputBufferSize:    16 * 1024,
-		OutputBufferTimeout: 250 * time.Millisecond,
-
-		HeartbeatInterval: DefaultClientTimeout / 2,
-
-		UserAgent: fmt.Sprintf("go-nsq/%s", VERSION),
 	}
 }
 
@@ -252,13 +211,13 @@ func (c *Conn) String() string {
 
 // Read performs a deadlined read on the underlying TCP connection
 func (c *Conn) Read(p []byte) (int, error) {
-	c.SetReadDeadline(time.Now().Add(c.ReadTimeout))
+	c.SetReadDeadline(time.Now().Add(c.config.readTimeout))
 	return c.r.Read(p)
 }
 
 // Write performs a deadlined write on the underlying TCP connection
 func (c *Conn) Write(p []byte) (int, error) {
-	c.SetWriteDeadline(time.Now().Add(c.WriteTimeout))
+	c.SetWriteDeadline(time.Now().Add(c.config.writeTimeout))
 	return c.w.Write(p)
 }
 
@@ -299,18 +258,20 @@ func (c *Conn) ReadUnpackedResponse() (int32, []byte, error) {
 
 func (c *Conn) identify() (*IdentifyResponse, error) {
 	ci := make(map[string]interface{})
-	ci["short_id"] = c.ShortIdentifier
-	ci["long_id"] = c.LongIdentifier
-	ci["tls_v1"] = c.TLSv1
-	ci["deflate"] = c.Deflate
-	ci["deflate_level"] = c.DeflateLevel
-	ci["snappy"] = c.Snappy
+	ci["client_id"] = c.config.clientID
+	ci["hostname"] = c.config.hostname
+	ci["user_agent"] = c.config.userAgent
+	ci["short_id"] = c.config.clientID // deprecated
+	ci["long_id"] = c.config.hostname // deprecated
+	ci["tls_v1"] = c.config.tlsV1
+	ci["deflate"] = c.config.deflate
+	ci["deflate_level"] = c.config.deflateLevel
+	ci["snappy"] = c.config.snappy
 	ci["feature_negotiation"] = true
-	ci["heartbeat_interval"] = int64(c.HeartbeatInterval / time.Millisecond)
-	ci["sample_rate"] = c.SampleRate
-	ci["user_agent"] = c.UserAgent
-	ci["output_buffer_size"] = c.OutputBufferSize
-	ci["output_buffer_timeout"] = int64(c.OutputBufferTimeout / time.Millisecond)
+	ci["heartbeat_interval"] = int64(c.config.heartbeatInterval / time.Millisecond)
+	ci["sample_rate"] = c.config.sampleRate
+	ci["output_buffer_size"] = c.config.outputBufferSize
+	ci["output_buffer_timeout"] = int64(c.config.outputBufferTimeout / time.Millisecond)
 	cmd, err := Identify(ci)
 	if err != nil {
 		return nil, ErrIdentify{Reason: err.Error()}
@@ -345,14 +306,14 @@ func (c *Conn) identify() (*IdentifyResponse, error) {
 	c.maxRdyCount = resp.MaxRdyCount
 
 	if resp.TLSv1 {
-		err := c.upgradeTLS(c.TLSConfig)
+		err := c.upgradeTLS(c.config.tlsConfig)
 		if err != nil {
 			return nil, ErrIdentify{err.Error()}
 		}
 	}
 
 	if resp.Deflate {
-		err := c.upgradeDeflate(c.DeflateLevel)
+		err := c.upgradeDeflate(c.config.deflateLevel)
 		if err != nil {
 			return nil, ErrIdentify{err.Error()}
 		}

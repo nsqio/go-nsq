@@ -38,7 +38,8 @@ func TestWriterConnection(t *testing.T) {
 	log.SetOutput(ioutil.Discard)
 	defer log.SetOutput(os.Stdout)
 
-	w := NewWriter("127.0.0.1:4150")
+	config := NewConfig()
+	w := NewWriter("127.0.0.1:4150", config)
 
 	_, _, err := w.Publish("write_test", []byte("test"))
 	if err != nil {
@@ -60,7 +61,8 @@ func TestWriterPublish(t *testing.T) {
 	topicName := "publish" + strconv.Itoa(int(time.Now().Unix()))
 	msgCount := 10
 
-	w := NewWriter("127.0.0.1:4150")
+	config := NewConfig()
+	w := NewWriter("127.0.0.1:4150", config)
 	defer w.Stop()
 
 	for i := 0; i < msgCount; i++ {
@@ -85,7 +87,8 @@ func TestWriterMultiPublish(t *testing.T) {
 	topicName := "multi_publish" + strconv.Itoa(int(time.Now().Unix()))
 	msgCount := 10
 
-	w := NewWriter("127.0.0.1:4150")
+	config := NewConfig()
+	w := NewWriter("127.0.0.1:4150", config)
 	defer w.Stop()
 
 	var testData [][]byte
@@ -113,7 +116,8 @@ func TestWriterPublishAsync(t *testing.T) {
 	topicName := "async_publish" + strconv.Itoa(int(time.Now().Unix()))
 	msgCount := 10
 
-	w := NewWriter("127.0.0.1:4150")
+	config := NewConfig()
+	w := NewWriter("127.0.0.1:4150", config)
 	defer w.Stop()
 
 	responseChan := make(chan *WriterTransaction, msgCount)
@@ -152,7 +156,8 @@ func TestWriterMultiPublishAsync(t *testing.T) {
 	topicName := "multi_publish" + strconv.Itoa(int(time.Now().Unix()))
 	msgCount := 10
 
-	w := NewWriter("127.0.0.1:4150")
+	config := NewConfig()
+	w := NewWriter("127.0.0.1:4150", config)
 	defer w.Stop()
 
 	var testData [][]byte
@@ -194,9 +199,10 @@ func TestWriterHeartbeat(t *testing.T) {
 
 	topicName := "heartbeat" + strconv.Itoa(int(time.Now().Unix()))
 
-	w := NewWriter("127.0.0.1:4150")
+	config := NewConfig()
+	config.Set("heartbeat_interval", 100*time.Millisecond)
+	w := NewWriter("127.0.0.1:4150", config)
 	defer w.Stop()
-	w.HeartbeatInterval = 100 * time.Millisecond
 
 	_, _, err := w.Publish(topicName, []byte("publish_test_case"))
 	if err == nil {
@@ -207,9 +213,10 @@ func TestWriterHeartbeat(t *testing.T) {
 		t.Fatalf("wrong error - %s", err)
 	}
 
-	w = NewWriter("127.0.0.1:4150")
+	config = NewConfig()
+	config.Set("heartbeat_interval", 1000 * time.Millisecond)
+	w = NewWriter("127.0.0.1:4150", config)
 	defer w.Stop()
-	w.HeartbeatInterval = 1000 * time.Millisecond
 
 	_, _, err = w.Publish(topicName, []byte("publish_test_case"))
 	if err != nil {
@@ -235,10 +242,11 @@ func TestWriterHeartbeat(t *testing.T) {
 }
 
 func readMessages(topicName string, t *testing.T, msgCount int) {
-	q, _ := NewReader(topicName, "ch")
-	q.VerboseLogging = true
-	q.DefaultRequeueDelay = 0
-	q.SetMaxBackoffDuration(time.Millisecond * 50)
+	config := NewConfig()
+	config.Set("verbose", true)
+	config.Set("default_requeue_delay", 0)
+	config.Set("max_backoff_duration", time.Millisecond*50)
+	q, _ := NewReader(topicName, "ch", config)
 
 	h := &ReaderHandler{
 		t: t,

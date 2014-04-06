@@ -114,25 +114,22 @@ func readerTest(t *testing.T, deflate bool, snappy bool, tlsv1 bool) {
 	}
 	topicName = topicName + strconv.Itoa(int(time.Now().Unix()))
 
-	q, _ := NewReader(topicName, "ch")
-	q.VerboseLogging = true
+	config := NewConfig()
+	config.Set("verbose", true)
 	// so that the test can simulate reaching max requeues and a call to LogFailedMessage
-	q.DefaultRequeueDelay = 0
+	config.Set("default_requeue_delay", 0)
 	// so that the test wont timeout from backing off
-	q.SetMaxBackoffDuration(time.Millisecond * 50)
-
-	if deflate {
-		q.Deflate = true
-		q.DeflateLevel = 6
-	} else if snappy {
-		q.Snappy = true
-	}
+	config.Set("max_backoff_duration", time.Millisecond*50)
+	config.Set("deflate", deflate)
+	config.Set("deflate_level", 6)
+	config.Set("snappy", snappy)
+	config.Set("tls_v1", tlsv1)
 	if tlsv1 {
-		q.TLSv1 = true
-		q.TLSConfig = &tls.Config{
+		config.Set("tls_config", &tls.Config{
 			InsecureSkipVerify: true,
-		}
+		})
 	}
+	q, _ := NewReader(topicName, "ch", config)
 
 	h := &MyTestHandler{
 		t: t,

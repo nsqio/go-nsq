@@ -211,10 +211,11 @@ func TestReaderBackoff(t *testing.T) {
 	n := newMockNSQD(script)
 
 	topicName := "test_reader_commands" + strconv.Itoa(int(time.Now().Unix()))
-	q, _ := NewReader(topicName, "ch")
-	q.VerboseLogging = true
-	q.BackoffMultiplier = 10 * time.Millisecond
-	q.SetMaxInFlight(5)
+	config := NewConfig()
+	config.Set("verbose", true)
+	config.Set("max_in_flight", 5)
+	config.Set("backoff_multiplier", 10*time.Millisecond)
+	q, _ := NewReader(topicName, "ch", config)
 	q.AddHandler(&testHandler{})
 	err := q.ConnectToNSQ(n.tcpAddr.String())
 	if err != nil {
