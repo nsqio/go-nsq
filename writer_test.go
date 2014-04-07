@@ -202,7 +202,8 @@ func TestWriterHeartbeat(t *testing.T) {
 	if err == nil {
 		t.Fatalf("error should not be nil")
 	}
-	if err.Error() != "E_BAD_BODY IDENTIFY heartbeat interval (100) is invalid" {
+	if identifyError, ok := err.(ErrIdentify); !ok ||
+		identifyError.Reason != "E_BAD_BODY IDENTIFY heartbeat interval (100) is invalid" {
 		t.Fatalf("wrong error - %s", err)
 	}
 
