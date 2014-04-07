@@ -36,7 +36,7 @@ func (q *Reader) Configure(option string, value interface{}) error {
 		case string:
 			return strconv.ParseBool(v.(string))
 		case int, int16, uint16, int32, uint32, int64, uint64:
-			return reflect.ValueOf(value).Int() == 0, nil
+			return reflect.ValueOf(value).Int() != 0, nil
 		}
 		return false, errors.New("invalid value type")
 	}
