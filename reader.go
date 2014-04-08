@@ -297,7 +297,7 @@ func (q *Reader) Configure(option string, value interface{}) error {
 			return errors.New(fmt.Sprintf("invalid %s - %s", option, err))
 		}
 		if v < 0 || v > 1 {
-			return errors.New(fmt.Sprintf("invalid %s ! 0 <= %d <= 1", option, v))
+			return errors.New(fmt.Sprintf("invalid %s ! 0 <= %v <= 1", option, v))
 		}
 		q.LookupdPollJitter = v
 	case "max_requeue_delay":
@@ -372,7 +372,7 @@ func (q *Reader) Configure(option string, value interface{}) error {
 			return errors.New(fmt.Sprintf("invalid %s - %s", option, err))
 		}
 		if v < 0 || v > 99 {
-			return errors.New(fmt.Sprintf("invalid %s ! 0 <= %d <= 99", option, err))
+			return errors.New(fmt.Sprintf("invalid %s ! 0 <= %d <= 99", option, v))
 		}
 		q.SampleRate = int32(v)
 	case "user_agent":
