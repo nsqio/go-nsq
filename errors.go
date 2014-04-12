@@ -5,6 +5,12 @@ import (
 	"fmt"
 )
 
+// returned when a publish command is made against a Writer that is not connected
+var ErrNotConnected = errors.New("not connected")
+
+// returned when a publish command is made against a Writer that has been stopped
+var ErrStopped = errors.New("stopped")
+
 // returned from ConnectToNSQ when already connected
 var ErrAlreadyConnected = errors.New("already connected")
 
@@ -20,4 +26,12 @@ type ErrIdentify struct {
 
 func (e ErrIdentify) Error() string {
 	return fmt.Sprintf("failed to IDENTIFY - %s", e.Reason)
+}
+
+type ErrProtocol struct {
+	Reason string
+}
+
+func (e ErrProtocol) Error() string {
+	return e.Reason
 }

@@ -1,7 +1,6 @@
 package nsq
 
 import (
-	"errors"
 	"log"
 	"sync"
 	"sync/atomic"
@@ -38,12 +37,10 @@ type Writer struct {
 // to retrieve metadata about the command after the
 // response is received.
 type WriterTransaction struct {
-	cmd       *Command
-	doneChan  chan *WriterTransaction
-	FrameType int32         // the frame type received in response to the publish command
-	Data      []byte        // the response data of the publish command
-	Error     error         // the error (or nil) of the publish command
-	Args      []interface{} // the slice of variadic arguments passed to PublishAsync or MultiPublishAsync
+	cmd      *Command
+	doneChan chan *WriterTransaction
+	Error    error         // the error (or nil) of the publish command
+	Args     []interface{} // the slice of variadic arguments passed to PublishAsync or MultiPublishAsync
 }
 
 func (t *WriterTransaction) finish() {
@@ -51,12 +48,6 @@ func (t *WriterTransaction) finish() {
 		t.doneChan <- t
 	}
 }
-
-// returned when a publish command is made against a Writer that is not connected
-var ErrNotConnected = errors.New("not connected")
-
-// returned when a publish command is made against a Writer that has been stopped
-var ErrStopped = errors.New("stopped")
 
 // NewWriter returns an instance of Writer for the specified address
 func NewWriter(addr string, config *Config) *Writer {
@@ -119,29 +110,29 @@ func (w *Writer) MultiPublishAsync(topic string, body [][]byte, doneChan chan *W
 
 // Publish synchronously publishes a message body to the specified topic, returning
 // the response frameType, data, and error
-func (w *Writer) Publish(topic string, body []byte) (int32, []byte, error) {
+func (w *Writer) Publish(topic string, body []byte) error {
 	return w.sendCommand(Publish(topic, body))
 }
 
 // MultiPublish synchronously publishes a slice of message bodies to the specified topic, returning
 // the response frameType, data, and error
-func (w *Writer) MultiPublish(topic string, body [][]byte) (int32, []byte, error) {
+func (w *Writer) MultiPublish(topic string, body [][]byte) error {
 	cmd, err := MultiPublish(topic, body)
 	if err != nil {
-		return -1, nil, err
+		return err
 	}
 	return w.sendCommand(cmd)
 }
 
-func (w *Writer) sendCommand(cmd *Command) (int32, []byte, error) {
+func (w *Writer) sendCommand(cmd *Command) error {
 	doneChan := make(chan *WriterTransaction)
 	err := w.sendCommandAsync(cmd, doneChan, nil)
 	if err != nil {
 		close(doneChan)
-		return -1, nil, err
+		return err
 	}
 	t := <-doneChan
-	return t.FrameType, t.Data, t.Error
+	return t.Error
 }
 
 func (w *Writer) sendCommandAsync(cmd *Command, doneChan chan *WriterTransaction,
@@ -159,10 +150,9 @@ func (w *Writer) sendCommandAsync(cmd *Command, doneChan chan *WriterTransaction
 	}
 
 	t := &WriterTransaction{
-		cmd:       cmd,
-		doneChan:  doneChan,
-		FrameType: -1,
-		Args:      args,
+		cmd:      cmd,
+		doneChan: doneChan,
+		Args:     args,
 	}
 
 	select {
@@ -269,9 +259,9 @@ exit:
 func (w *Writer) popTransaction(frameType int32, data []byte) {
 	t := w.transactions[0]
 	w.transactions = w.transactions[1:]
-	t.FrameType = frameType
-	t.Data = data
-	t.Error = nil
+	if frameType == FrameTypeError {
+		t.Error = ErrProtocol{string(data)}
+	}
 	t.finish()
 }
 

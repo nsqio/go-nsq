@@ -41,14 +41,14 @@ func TestWriterConnection(t *testing.T) {
 	config := NewConfig()
 	w := NewWriter("127.0.0.1:4150", config)
 
-	_, _, err := w.Publish("write_test", []byte("test"))
+	err := w.Publish("write_test", []byte("test"))
 	if err != nil {
 		t.Fatalf("should lazily connect")
 	}
 
 	w.Stop()
 
-	_, _, err = w.Publish("write_test", []byte("fail test"))
+	err = w.Publish("write_test", []byte("fail test"))
 	if err != ErrStopped {
 		t.Fatalf("should not be able to write after Stop()")
 	}
@@ -66,15 +66,15 @@ func TestWriterPublish(t *testing.T) {
 	defer w.Stop()
 
 	for i := 0; i < msgCount; i++ {
-		frameType, data, err := w.Publish(topicName, []byte("publish_test_case"))
+		err := w.Publish(topicName, []byte("publish_test_case"))
 		if err != nil {
-			t.Fatalf("frametype %d data %s error %s", frameType, string(data), err.Error())
+			t.Fatalf("error %s", err)
 		}
 	}
 
-	frameType, data, err := w.Publish(topicName, []byte("bad_test_case"))
+	err := w.Publish(topicName, []byte("bad_test_case"))
 	if err != nil {
-		t.Fatalf("frametype %d data %s error %s", frameType, string(data), err.Error())
+		t.Fatalf("error %s", err)
 	}
 
 	readMessages(topicName, t, msgCount)
@@ -96,14 +96,14 @@ func TestWriterMultiPublish(t *testing.T) {
 		testData = append(testData, []byte("multipublish_test_case"))
 	}
 
-	frameType, data, err := w.MultiPublish(topicName, testData)
+	err := w.MultiPublish(topicName, testData)
 	if err != nil {
-		t.Fatalf("frametype %d data %s error %s", frameType, string(data), err.Error())
+		t.Fatalf("error %s", err)
 	}
 
-	frameType, data, err = w.Publish(topicName, []byte("bad_test_case"))
+	err = w.Publish(topicName, []byte("bad_test_case"))
 	if err != nil {
-		t.Fatalf("frametype %d data %s error %s", frameType, string(data), err.Error())
+		t.Fatalf("error %s", err)
 	}
 
 	readMessages(topicName, t, msgCount)
@@ -133,17 +133,14 @@ func TestWriterPublishAsync(t *testing.T) {
 		if trans.Error != nil {
 			t.Fatalf(trans.Error.Error())
 		}
-		if trans.FrameType != int32(0) {
-			t.Fatalf("FrameType %d != 0", trans.FrameType)
-		}
 		if trans.Args[0].(string) != "test" {
 			t.Fatalf(`proxied arg "%s" != "test"`, trans.Args[0].(string))
 		}
 	}
 
-	frameType, data, err := w.Publish(topicName, []byte("bad_test_case"))
+	err := w.Publish(topicName, []byte("bad_test_case"))
 	if err != nil {
-		t.Fatalf("frametype %d data %s error %s", frameType, string(data), err.Error())
+		t.Fatalf("error %s", err)
 	}
 
 	readMessages(topicName, t, msgCount)
@@ -175,9 +172,6 @@ func TestWriterMultiPublishAsync(t *testing.T) {
 	if trans.Error != nil {
 		t.Fatalf(trans.Error.Error())
 	}
-	if trans.FrameType != int32(0) {
-		t.Fatalf("FrameType %d != 0", trans.FrameType)
-	}
 	if trans.Args[0].(string) != "test0" {
 		t.Fatalf(`proxied arg "%s" != "test0"`, trans.Args[0].(string))
 	}
@@ -185,9 +179,9 @@ func TestWriterMultiPublishAsync(t *testing.T) {
 		t.Fatalf(`proxied arg %d != 1`, trans.Args[1].(int))
 	}
 
-	frameType, data, err := w.Publish(topicName, []byte("bad_test_case"))
+	err = w.Publish(topicName, []byte("bad_test_case"))
 	if err != nil {
-		t.Fatalf("frametype %d data %s error %s", frameType, string(data), err.Error())
+		t.Fatalf("error %s", err)
 	}
 
 	readMessages(topicName, t, msgCount)
@@ -204,7 +198,7 @@ func TestWriterHeartbeat(t *testing.T) {
 	w := NewWriter("127.0.0.1:4150", config)
 	defer w.Stop()
 
-	_, _, err := w.Publish(topicName, []byte("publish_test_case"))
+	err := w.Publish(topicName, []byte("publish_test_case"))
 	if err == nil {
 		t.Fatalf("error should not be nil")
 	}
@@ -214,11 +208,11 @@ func TestWriterHeartbeat(t *testing.T) {
 	}
 
 	config = NewConfig()
-	config.Set("heartbeat_interval", 1000 * time.Millisecond)
+	config.Set("heartbeat_interval", 1000*time.Millisecond)
 	w = NewWriter("127.0.0.1:4150", config)
 	defer w.Stop()
 
-	_, _, err = w.Publish(topicName, []byte("publish_test_case"))
+	err = w.Publish(topicName, []byte("publish_test_case"))
 	if err != nil {
 		t.Fatalf(err.Error())
 	}
@@ -227,15 +221,15 @@ func TestWriterHeartbeat(t *testing.T) {
 
 	msgCount := 10
 	for i := 0; i < msgCount; i++ {
-		frameType, data, err := w.Publish(topicName, []byte("publish_test_case"))
+		err := w.Publish(topicName, []byte("publish_test_case"))
 		if err != nil {
-			t.Fatalf("frametype %d data %s error %s", frameType, string(data), err.Error())
+			t.Fatalf("error %s", err)
 		}
 	}
 
-	frameType, data, err := w.Publish(topicName, []byte("bad_test_case"))
+	err = w.Publish(topicName, []byte("bad_test_case"))
 	if err != nil {
-		t.Fatalf("frametype %d data %s error %s", frameType, string(data), err.Error())
+		t.Fatalf("error %s", err)
 	}
 
 	readMessages(topicName, t, msgCount+1)
