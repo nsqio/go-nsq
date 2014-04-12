@@ -209,7 +209,7 @@ func (q *Reader) lookupdLoop() {
 	// when restarted at the same time, dont all connect at once.
 	rand.Seed(time.Now().UnixNano())
 
-	jitter := time.Duration(int64(rand.Float64() * 
+	jitter := time.Duration(int64(rand.Float64() *
 		q.config.lookupdPollJitter * float64(q.config.lookupdPollInterval)))
 	ticker := time.NewTicker(q.config.lookupdPollInterval)
 

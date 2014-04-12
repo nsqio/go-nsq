@@ -263,7 +263,7 @@ func (c *Conn) identify() (*IdentifyResponse, error) {
 	ci["hostname"] = c.config.hostname
 	ci["user_agent"] = c.config.userAgent
 	ci["short_id"] = c.config.clientID // deprecated
-	ci["long_id"] = c.config.hostname // deprecated
+	ci["long_id"] = c.config.hostname  // deprecated
 	ci["tls_v1"] = c.config.tlsV1
 	ci["deflate"] = c.config.deflate
 	ci["deflate_level"] = c.config.deflateLevel
@@ -275,17 +275,17 @@ func (c *Conn) identify() (*IdentifyResponse, error) {
 	ci["output_buffer_timeout"] = int64(c.config.outputBufferTimeout / time.Millisecond)
 	cmd, err := Identify(ci)
 	if err != nil {
-		return nil, ErrIdentify{Reason: err.Error()}
+		return nil, ErrIdentify{err.Error()}
 	}
 
 	err = c.WriteCommand(cmd)
 	if err != nil {
-		return nil, ErrIdentify{Reason: err.Error()}
+		return nil, ErrIdentify{err.Error()}
 	}
 
 	frameType, data, err := c.ReadUnpackedResponse()
 	if err != nil {
-		return nil, ErrIdentify{Reason: err.Error()}
+		return nil, ErrIdentify{err.Error()}
 	}
 
 	if frameType == FrameTypeError {
@@ -328,6 +328,7 @@ func (c *Conn) identify() (*IdentifyResponse, error) {
 	}
 
 	// now that connection is bootstrapped, enable read buffering
+	// (and write buffering if it's not already capable of Flush())
 	c.r = bufio.NewReader(c.r)
 	if _, ok := c.w.(flusher); !ok {
 		c.w = bufio.NewWriter(c.w)
@@ -542,15 +543,11 @@ func (c *Conn) close() {
 func (c *Conn) cleanup() {
 	<-c.drainReady
 	ticker := time.NewTicker(100 * time.Millisecond)
-	// finishLoop has exited, drain any remaining in flight messages
+	// writeLoop has exited, drain any remaining in flight messages
 	for {
-		// we're racing with router which potentially has a message
-		// for handling...
-		//
-		// infinitely loop until the connection's waitgroup is satisfied,
-		// ensuring that both finishLoop and router have exited, at which
-		// point we can be guaranteed that messagesInFlight accurately
-		// represents whatever is left... continue until 0.
+		// we're racing with readLoop which potentially has a message
+		// for handling so infinitely loop until messagesInFlight == 0
+		// and readLoop has exited
 		var msgsInFlight int64
 		select {
 		case <-c.finishedMessages:
