@@ -49,9 +49,6 @@ type Conn struct {
 	tlsConn *tls.Conn
 	addr    string
 
-	r io.Reader
-	w io.Writer
-
 	// ResponseCB is called when the connection
 	// receives a FrameTypeResponse from nsqd
 	ResponseCB func(*Conn, []byte)
@@ -80,9 +77,8 @@ type Conn struct {
 	// closes, after all cleanup
 	CloseCB func(*Conn)
 
-	cmdBuf bytes.Buffer
-
-	flateWriter *flate.Writer
+	r io.Reader
+	w io.Writer
 
 	backoffCounter int32
 	rdyRetryTimer  *time.Timer
@@ -221,27 +217,32 @@ func (c *Conn) Write(p []byte) (int, error) {
 	return c.w.Write(p)
 }
 
-// SendCommand writes the specified Command to the underlying
-// TCP connection according to the NSQ TCP protocol spec
-func (c *Conn) SendCommand(cmd *Command) error {
+func (c *Conn) WriteCommand(cmd *Command) error {
 	c.Lock()
-	defer c.Unlock()
 
-	c.cmdBuf.Reset()
-	err := cmd.Write(&c.cmdBuf)
+	_, err := cmd.WriteTo(c)
 	if err != nil {
-		return err
+		goto exit
 	}
+	err = c.Flush()
 
-	_, err = c.cmdBuf.WriteTo(c)
+exit:
+	c.Unlock()
 	if err != nil {
-		return err
+		c.IOErrorCB(c, err)
 	}
+	return err
+}
 
-	if c.flateWriter != nil {
-		return c.flateWriter.Flush()
+type flusher interface {
+	Flush() error
+}
+
+// Flush writes all buffered data to the underlying TCP connection
+func (c *Conn) Flush() error {
+	if f, ok := c.w.(flusher); ok {
+		return f.Flush()
 	}
-
 	return nil
 }
 
@@ -277,7 +278,7 @@ func (c *Conn) identify() (*IdentifyResponse, error) {
 		return nil, ErrIdentify{Reason: err.Error()}
 	}
 
-	err = c.SendCommand(cmd)
+	err = c.WriteCommand(cmd)
 	if err != nil {
 		return nil, ErrIdentify{Reason: err.Error()}
 	}
@@ -328,6 +329,9 @@ func (c *Conn) identify() (*IdentifyResponse, error) {
 
 	// now that connection is bootstrapped, enable read buffering
 	c.r = bufio.NewReader(c.r)
+	if _, ok := c.w.(flusher); !ok {
+		c.w = bufio.NewWriter(c.w)
+	}
 
 	return resp, nil
 }
@@ -355,9 +359,8 @@ func (c *Conn) upgradeDeflate(level int) error {
 	if c.tlsConn != nil {
 		conn = c.tlsConn
 	}
-	c.r = flate.NewReader(conn)
 	fw, _ := flate.NewWriter(conn, level)
-	c.flateWriter = fw
+	c.r = flate.NewReader(conn)
 	c.w = fw
 	frameType, data, err := c.ReadUnpackedResponse()
 	if err != nil {
@@ -400,7 +403,7 @@ func (c *Conn) readLoop() {
 
 		if frameType == FrameTypeResponse && bytes.Equal(data, []byte("_heartbeat_")) {
 			c.HeartbeatCB(c)
-			err := c.SendCommand(Nop())
+			err := c.WriteCommand(Nop())
 			if err != nil {
 				c.IOErrorCB(c, err)
 				goto exit
@@ -459,7 +462,7 @@ func (c *Conn) writeLoop() {
 			close(c.drainReady)
 			goto exit
 		case cmd := <-c.cmdChan:
-			err := c.SendCommand(cmd)
+			err := c.WriteCommand(cmd)
 			if err != nil {
 				log.Printf("[%s] error sending command %s - %s", c, cmd, err)
 				c.close()
@@ -470,14 +473,14 @@ func (c *Conn) writeLoop() {
 			msgsInFlight := atomic.AddInt64(&c.messagesInFlight, -1)
 
 			if finishedMsg.Success {
-				err := c.SendCommand(Finish(finishedMsg.Id))
+				err := c.WriteCommand(Finish(finishedMsg.Id))
 				if err != nil {
 					log.Printf("[%s] error finishing %s - %s", c, finishedMsg.Id, err.Error())
 					c.close()
 					continue
 				}
 			} else {
-				err := c.SendCommand(Requeue(finishedMsg.Id, finishedMsg.RequeueDelayMs))
+				err := c.WriteCommand(Requeue(finishedMsg.Id, finishedMsg.RequeueDelayMs))
 				if err != nil {
 					log.Printf("[%s] error requeueing %s - %s", c, finishedMsg.Id, err.Error())
 					c.close()

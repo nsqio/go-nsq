@@ -371,7 +371,7 @@ func (q *Reader) ConnectToNSQ(addr string) error {
 	}
 
 	cmd := Subscribe(q.topic, q.channel)
-	err = conn.SendCommand(cmd)
+	err = conn.WriteCommand(cmd)
 	if err != nil {
 		cleanupConnection()
 		return fmt.Errorf("[%s] failed to subscribe to %s:%s - %s",
@@ -703,7 +703,7 @@ func (q *Reader) sendRDY(c *Conn, count int64) error {
 
 	atomic.AddInt64(&q.totalRdyCount, -c.RDY()+count)
 	c.SetRDY(count)
-	err := c.SendCommand(Ready(int(count)))
+	err := c.WriteCommand(Ready(int(count)))
 	if err != nil {
 		log.Printf("[%s] error sending RDY %d - %s", c, count, err)
 		c.Stop()
@@ -778,7 +778,7 @@ func (q *Reader) Stop() {
 		q.stopHandlers()
 	} else {
 		for _, c := range q.conns() {
-			err := c.SendCommand(StartClose())
+			err := c.WriteCommand(StartClose())
 			if err != nil {
 				log.Printf("[%s] failed to start close - %s", c, err.Error())
 				c.Stop()

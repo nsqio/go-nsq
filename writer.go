@@ -239,7 +239,7 @@ func (w *Writer) router() {
 		select {
 		case t := <-w.transactionChan:
 			w.transactions = append(w.transactions, t)
-			err := w.conn.SendCommand(t.cmd)
+			err := w.conn.WriteCommand(t.cmd)
 			if err != nil {
 				log.Printf("ERROR: [%s] failed writing %s", w, err)
 				w.close()
