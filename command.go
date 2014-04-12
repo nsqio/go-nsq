@@ -30,41 +30,51 @@ func (c *Command) String() string {
 // Write serializes the Command to the supplied Writer.
 //
 // It is suggested that the target Writer is buffered to avoid performing many system calls.
-func (c *Command) Write(w io.Writer) error {
-	_, err := w.Write(c.Name)
+func (c *Command) WriteTo(w io.Writer) (int64, error) {
+	var total int64
+	var buf [4]byte
+
+	n, err := w.Write(c.Name)
+	total += int64(n)
 	if err != nil {
-		return err
+		return total, err
 	}
 
 	for _, param := range c.Params {
-		_, err := w.Write(byteSpace)
+		n, err := w.Write(byteSpace)
+		total += int64(n)
 		if err != nil {
-			return err
+			return total, err
 		}
-		_, err = w.Write(param)
+		n, err = w.Write(param)
+		total += int64(n)
 		if err != nil {
-			return err
+			return total, err
 		}
 	}
 
-	_, err = w.Write(byteNewLine)
+	n, err = w.Write(byteNewLine)
+	total += int64(n)
 	if err != nil {
-		return err
+		return total, err
 	}
 
 	if c.Body != nil {
-		bodySize := int32(len(c.Body))
-		err := binary.Write(w, binary.BigEndian, &bodySize)
+		bufs := buf[:]
+		binary.BigEndian.PutUint32(bufs, uint32(len(c.Body)))
+		n, err := w.Write(bufs)
+		total += int64(n)
 		if err != nil {
-			return err
+			return total, err
 		}
-		_, err = w.Write(c.Body)
+		n, err = w.Write(c.Body)
+		total += int64(n)
 		if err != nil {
-			return err
+			return total, err
 		}
 	}
 
-	return nil
+	return total, nil
 }
 
 // Identify creates a new Command to provide information about the client.  After connecting,
