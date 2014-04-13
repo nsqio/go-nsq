@@ -27,27 +27,6 @@ type Handler interface {
 	HandleMessage(message *Message) error
 }
 
-// AsyncHandler is the asynchronous interface to Reader.
-//
-// Implement this interface for handlers that wish to defer responding until later.
-// This is particularly useful if you want to batch work together.
-//
-// An AsyncHandler must send:
-//
-//     &FinishedMessage{messageID, requeueDelay, true|false}
-//
-// To the supplied responseChan to indicate that a message is processed.
-type AsyncHandler interface {
-	HandleMessage(message *Message, responseChan chan *FinishedMessage)
-}
-
-// FinishedMessage is the data type used over responseChan in AsyncHandlers
-type FinishedMessage struct {
-	Id             MessageID
-	RequeueDelayMs int
-	Success        bool
-}
-
 // FailedMessageLogger is an interface that can be implemented by handlers that wish
 // to receive a callback when a message is deemed "failed" (i.e. the number of attempts
 // exceeded the Reader specified MaxAttemptCount)
@@ -57,10 +36,10 @@ type FailedMessageLogger interface {
 
 // Reader is a high-level type to consume from NSQ.
 //
-// A Reader instance is supplied handler(s) that will be executed
+// A Reader instance is supplied a Handler that will be executed
 // concurrently via goroutines to handle processing the stream of messages
-// consumed from the specified topic/channel.  See: AsyncHandler and Handler
-// for details on implementing those interfaces to create handlers.
+// consumed from the specified topic/channel. See: Handler/HandlerFunc
+// for details on implementing the interface to create handlers.
 //
 // If configured, it will poll nsqlookupd instances and handle connection (and
 // reconnection) to any discovered nsqds.
@@ -810,10 +789,10 @@ func (q *Reader) stopHandlers() {
 // are concurrently executed in goroutines.
 func (q *Reader) AddHandler(handler Handler) {
 	atomic.AddInt32(&q.runningHandlers, 1)
-	go q.syncHandler(handler)
+	go q.handlerLoop(handler)
 }
 
-func (q *Reader) syncHandler(handler Handler) {
+func (q *Reader) handlerLoop(handler Handler) {
 	log.Println("Handler starting")
 	for {
 		message, ok := <-q.incomingMessages
@@ -825,9 +804,8 @@ func (q *Reader) syncHandler(handler Handler) {
 			break
 		}
 
-		finishedMessage := q.checkMessageAttempts(message, handler)
-		if finishedMessage != nil {
-			message.responseChan <- finishedMessage
+		if q.shouldFailMessage(message, handler) {
+			message.Finish()
 			continue
 		}
 
@@ -835,57 +813,19 @@ func (q *Reader) syncHandler(handler Handler) {
 		if err != nil {
 			log.Printf("ERROR: handler returned %s for msg %s %s",
 				err.Error(), message.Id, message.Body)
-		}
-
-		// linear delay
-		requeueDelay := q.config.defaultRequeueDelay * time.Duration(message.Attempts)
-		// bound the requeueDelay to configured max
-		if requeueDelay > q.config.maxRequeueDelay {
-			requeueDelay = q.config.maxRequeueDelay
-		}
-
-		message.responseChan <- &FinishedMessage{
-			Id:             message.Id,
-			RequeueDelayMs: int(requeueDelay / time.Millisecond),
-			Success:        err == nil,
-		}
-	}
-}
-
-// AddAsyncHandler adds an AsyncHandler for messages received by this Reader.
-//
-// See AsyncHandler for details on implementing this interface.
-//
-// It's ok to start more than one handler simultaneously, they
-// are concurrently executed in goroutines.
-func (q *Reader) AddAsyncHandler(handler AsyncHandler) {
-	atomic.AddInt32(&q.runningHandlers, 1)
-	go q.asyncHandler(handler)
-}
-
-func (q *Reader) asyncHandler(handler AsyncHandler) {
-	log.Println("AsyncHandler starting")
-	for {
-		message, ok := <-q.incomingMessages
-		if !ok {
-			log.Printf("AsyncHandler closing")
-			if atomic.AddInt32(&q.runningHandlers, -1) == 0 {
-				close(q.ExitChan)
+			if !message.IsAutoResponseDisabled() {
+				message.Requeue(-1)
 			}
-			break
-		}
-
-		finishedMessage := q.checkMessageAttempts(message, handler)
-		if finishedMessage != nil {
-			message.responseChan <- finishedMessage
 			continue
 		}
 
-		handler.HandleMessage(message, message.responseChan)
+		if !message.IsAutoResponseDisabled() {
+			message.Finish()
+		}
 	}
 }
 
-func (q *Reader) checkMessageAttempts(message *Message, handler interface{}) *FinishedMessage {
+func (q *Reader) shouldFailMessage(message *Message, handler interface{}) bool {
 	// message passed the max number of attempts
 	if q.config.maxAttempts > 0 && message.Attempts > q.config.maxAttempts {
 		log.Printf("WARNING: msg attempted %d times. giving up %s %s",
@@ -896,7 +836,7 @@ func (q *Reader) checkMessageAttempts(message *Message, handler interface{}) *Fi
 			logger.LogFailedMessage(message)
 		}
 
-		return &FinishedMessage{message.Id, 0, true}
+		return true
 	}
-	return nil
+	return false
 }
