@@ -249,7 +249,7 @@ func TestReaderBackoff(t *testing.T) {
 		"RDY 5",
 	}
 	if len(n.got) != len(expected) {
-		t.Fatalf("we got %d commands > %d expected", len(n.got), len(expected))
+		t.Fatalf("we got %d commands != %d expected", len(n.got), len(expected))
 	}
 	for i, r := range n.got {
 		if string(r) != expected[i] {
