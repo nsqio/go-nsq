@@ -27,6 +27,12 @@ type IdentifyResponse struct {
 	Snappy      bool  `json:"snappy"`
 }
 
+type msgResponse struct {
+	msg     *Message
+	cmd     *Command
+	success bool
+}
+
 // Conn represents a connection to nsqd
 //
 // Conn exposes a set of callbacks for the
@@ -61,9 +67,13 @@ type Conn struct {
 	// receives a FrameTypeMessage from nsqd
 	MessageCB func(*Conn, *Message)
 
-	// MessageProcessedCB is called when the connection
-	// handles a FIN or REQ command from a message handler
-	MessageProcessedCB func(*Conn, *FinishedMessage)
+	// MessageFinishedCB is called when the connection
+	// handles a FIN command from a message handler
+	MessageFinishedCB func(*Conn, *Message)
+
+	// MessageRequeuedCB is called when the connection
+	// handles a REQ command from a message handler
+	MessageRequeuedCB func(*Conn, *Message)
 
 	// IOErrorCB is called when the connection experiences
 	// a low-level TCP transport error
@@ -83,10 +93,10 @@ type Conn struct {
 	backoffCounter int32
 	rdyRetryTimer  *time.Timer
 
-	finishedMessages chan *FinishedMessage
-	cmdChan          chan *Command
-	exitChan         chan int
-	drainReady       chan int
+	cmdChan         chan *Command
+	msgResponseChan chan *msgResponse
+	exitChan        chan int
+	drainReady      chan int
 
 	stopFlag int32
 	stopper  sync.Once
@@ -107,10 +117,10 @@ func NewConn(addr string, topic string, channel string, config *Config) *Conn {
 		maxRdyCount:      2500,
 		lastMsgTimestamp: time.Now().UnixNano(),
 
-		finishedMessages: make(chan *FinishedMessage),
-		cmdChan:          make(chan *Command),
-		exitChan:         make(chan int),
-		drainReady:       make(chan int),
+		cmdChan:         make(chan *Command),
+		msgResponseChan: make(chan *msgResponse),
+		exitChan:        make(chan int),
+		drainReady:      make(chan int),
 	}
 }
 
@@ -421,9 +431,26 @@ func (c *Conn) readLoop() {
 				c.IOErrorCB(c, err)
 				goto exit
 			}
-			msg.cmdChan = c.cmdChan
-			msg.responseChan = c.finishedMessages
-			msg.exitChan = c.exitChan
+			msg.FinishCB = func(m *Message) {
+				c.msgResponseChan <- &msgResponse{m, Finish(m.Id), true}
+			}
+			msg.RequeueCB = func(m *Message, delay time.Duration) {
+				if delay == -1 {
+					// linear delay
+					delay = c.config.defaultRequeueDelay * time.Duration(m.Attempts)
+					// bound the requeueDelay to configured max
+					if delay > c.config.maxRequeueDelay {
+						delay = c.config.maxRequeueDelay
+					}
+				}
+				c.msgResponseChan <- &msgResponse{m, Requeue(m.Id, delay), false}
+			}
+			msg.TouchCB = func(m *Message) {
+				select {
+				case c.cmdChan <- Touch(m.Id):
+				case <-c.exitChan:
+				}
+			}
 
 			atomic.AddInt64(&c.rdyCount, -1)
 			atomic.AddInt64(&c.messagesInFlight, 1)
@@ -469,29 +496,25 @@ func (c *Conn) writeLoop() {
 				c.close()
 				continue
 			}
-		case finishedMsg := <-c.finishedMessages:
+		case resp := <-c.msgResponseChan:
 			// Decrement this here so it is correct even if we can't respond to nsqd
 			msgsInFlight := atomic.AddInt64(&c.messagesInFlight, -1)
 
-			if finishedMsg.Success {
-				err := c.WriteCommand(Finish(finishedMsg.Id))
-				if err != nil {
-					log.Printf("[%s] error finishing %s - %s", c, finishedMsg.Id, err.Error())
-					c.close()
-					continue
-				}
-			} else {
-				err := c.WriteCommand(Requeue(finishedMsg.Id, finishedMsg.RequeueDelayMs))
-				if err != nil {
-					log.Printf("[%s] error requeueing %s - %s", c, finishedMsg.Id, err.Error())
-					c.close()
-					continue
-				}
+			err := c.WriteCommand(resp.cmd)
+			if err != nil {
+				log.Printf("[%s] error sending command %s - %s", c, resp.cmd, err)
+				c.close()
+				continue
 			}
 
-			c.MessageProcessedCB(c, finishedMsg)
+			if resp.success {
+				c.MessageFinishedCB(c, resp.msg)
+			} else {
+				c.MessageRequeuedCB(c, resp.msg)
+			}
 
-			if msgsInFlight == 0 && atomic.LoadInt32(&c.stopFlag) == 1 {
+			if msgsInFlight == 0 &&
+				atomic.LoadInt32(&c.stopFlag) == 1 {
 				c.close()
 				continue
 			}
@@ -550,7 +573,7 @@ func (c *Conn) cleanup() {
 		// and readLoop has exited
 		var msgsInFlight int64
 		select {
-		case <-c.finishedMessages:
+		case <-c.msgResponseChan:
 			msgsInFlight = atomic.AddInt64(&c.messagesInFlight, -1)
 		case <-ticker.C:
 			msgsInFlight = atomic.LoadInt64(&c.messagesInFlight)

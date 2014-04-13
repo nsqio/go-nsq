@@ -319,8 +319,11 @@ func (q *Reader) ConnectToNSQ(addr string) error {
 	conn.MessageCB = func(c *Conn, msg *Message) {
 		q.onConnectionMessage(c, msg)
 	}
-	conn.MessageProcessedCB = func(c *Conn, finishedMsg *FinishedMessage) {
-		q.onConnectionMessageProcessed(c, finishedMsg)
+	conn.MessageFinishedCB = func(c *Conn, msg *Message) {
+		q.onConnectionMessageFinished(c, msg)
+	}
+	conn.MessageRequeuedCB = func(c *Conn, msg *Message) {
+		q.onConnectionMessageRequeued(c, msg)
 	}
 	conn.ResponseCB = func(c *Conn, data []byte) {
 		q.onConnectionResponse(c, data)
@@ -398,19 +401,20 @@ func (q *Reader) onConnectionMessage(c *Conn, msg *Message) {
 	q.rdyChan <- c
 }
 
-func (q *Reader) onConnectionMessageProcessed(c *Conn, finishedMsg *FinishedMessage) {
-	if finishedMsg.Success {
-		if q.config.verbose {
-			log.Printf("[%s] finishing %s", c, finishedMsg.Id)
-		}
-		atomic.AddUint64(&q.MessagesFinished, 1)
-	} else {
-		if q.config.verbose {
-			log.Printf("[%s] requeuing %s", c, finishedMsg.Id)
-		}
-		atomic.AddUint64(&q.MessagesRequeued, 1)
+func (q *Reader) onConnectionMessageFinished(c *Conn, msg *Message) {
+	if q.config.verbose {
+		log.Printf("[%s] finishing %s", c, msg.Id)
 	}
-	q.backoffChan <- finishedMsg.Success
+	atomic.AddUint64(&q.MessagesFinished, 1)
+	q.backoffChan <- true
+}
+
+func (q *Reader) onConnectionMessageRequeued(c *Conn, msg *Message) {
+	if q.config.verbose {
+		log.Printf("[%s] requeuing %s", c, msg.Id)
+	}
+	atomic.AddUint64(&q.MessagesRequeued, 1)
+	q.backoffChan <- false
 }
 
 func (q *Reader) onConnectionResponse(c *Conn, data []byte) {
