@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"time"
 )
 
 var byteSpace = []byte(" ")
@@ -175,10 +176,10 @@ func Finish(id MessageID) *Command {
 }
 
 // Requeue creates a new Command to indicate that
-// a given message (by id) should be requeued after the given timeout (in ms)
-// NOTE: a timeout of 0 indicates immediate requeue
-func Requeue(id MessageID, timeoutMs int) *Command {
-	var params = [][]byte{id[:], []byte(strconv.Itoa(timeoutMs))}
+// a given message (by id) should be requeued after the given delay
+// NOTE: a delay of 0 indicates immediate requeue
+func Requeue(id MessageID, delay time.Duration) *Command {
+	var params = [][]byte{id[:], []byte(strconv.Itoa(int(delay / time.Millisecond)))}
 	return &Command{[]byte("REQ"), params, nil}
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"io"
 	"io/ioutil"
+	"sync/atomic"
 	"time"
 )
 
@@ -21,9 +22,12 @@ type Message struct {
 	Timestamp int64
 	Attempts  uint16
 
-	exitChan     chan int
-	cmdChan      chan *Command
-	responseChan chan *FinishedMessage
+	RequeueCB func(*Message, time.Duration)
+	TouchCB   func(*Message)
+	FinishCB  func(*Message)
+
+	autoResponseDisabled int32
+	responded            int32
 }
 
 // NewMessage creates a Message, initializes some metadata,
@@ -36,24 +40,62 @@ func NewMessage(id MessageID, body []byte) *Message {
 	}
 }
 
+// DisableAutoResponse disables the automatic response that
+// would normally be sent when a handler.HandleMessage
+// returns (FIN/REQ based on the error value returned).
+//
+// This is useful if you want to batch, buffer, or asynchronously
+// respond to messages.
+func (m *Message) DisableAutoResponse() {
+	atomic.StoreInt32(&m.autoResponseDisabled, 1)
+}
+
+// IsAutoResponseDisabled indicates whether or not this message
+// will be responded to automatically
+func (m *Message) IsAutoResponseDisabled() bool {
+	return atomic.LoadInt32(&m.autoResponseDisabled) == 1
+}
+
+// HasResponded indicates whether or not this message has been responded to
+func (m *Message) HasResponded() bool {
+	return atomic.LoadInt32(&m.responded) == 1
+}
+
+// Finish sends a FIN command to the nsqd which
+// sent this message
+func (m *Message) Finish() {
+	if m.HasResponded() {
+		return
+	}
+	m.FinishCB(m)
+	atomic.StoreInt32(&m.responded, 1)
+}
+
 // Touch sends a TOUCH command to the nsqd which
 // sent this message
 func (m *Message) Touch() {
-	select {
-	case m.cmdChan <- Touch(m.Id):
-	case <-m.exitChan:
+	if m.HasResponded() {
+		return
 	}
+	m.TouchCB(m)
 }
 
-// Requeue sends a REQUEUE command to the nsqd which
-// sent this message, using the supplied delay
-func (m *Message) Requeue(timeoutMs int) {
-	finishedMessage := &FinishedMessage{
-		Id:             m.Id,
-		RequeueDelayMs: timeoutMs,
-		Success:        false,
+// Requeue sends a REQ command to the nsqd which
+// sent this message, using the supplied delay.
+//
+// A delay of -1 will automatically calculate
+// based on the number of attempts and the
+// configured default_requeue_delay
+func (m *Message) Requeue(delay time.Duration) {
+	m.doRequeue(delay, true)
+}
+
+func (m *Message) doRequeue(delay time.Duration, backoff bool) {
+	if m.HasResponded() {
+		return
 	}
-	m.responseChan <- finishedMessage
+	m.RequeueCB(m, delay)
+	atomic.StoreInt32(&m.responded, 1)
 }
 
 // EncodeBytes serializes the message into a new, returned, []byte
