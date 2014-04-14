@@ -73,12 +73,14 @@ type Reader struct {
 	lookupdHTTPAddrs   []string
 	lookupdQueryIndex  int
 
+	wg              sync.WaitGroup
 	runningHandlers int32
 	stopFlag        int32
 	stopHandler     sync.Once
 
-	// read from this channel to ensure clean exit
-	ExitChan chan int
+	// read from this channel to block until reader is cleanly stopped
+	StopChan chan int
+	exitChan chan int
 }
 
 // NewReader creates a new instance of Reader for the specified topic/channel
@@ -109,8 +111,10 @@ func NewReader(topic string, channel string, config *Config) (*Reader, error) {
 		backoffChan:        make(chan bool),
 		rdyChan:            make(chan *Conn, 1),
 
-		ExitChan: make(chan int),
+		StopChan: make(chan int),
+		exitChan: make(chan int),
 	}
+	q.wg.Add(1)
 	go q.rdyLoop()
 	return q, nil
 }
@@ -176,6 +180,7 @@ func (q *Reader) ConnectToLookupd(addr string) error {
 	// if this is the first one, kick off the go loop
 	if numLookupd == 1 {
 		q.queryLookupd()
+		q.wg.Add(1)
 		go q.lookupdLoop()
 	}
 
@@ -194,7 +199,7 @@ func (q *Reader) lookupdLoop() {
 
 	select {
 	case <-time.After(jitter):
-	case <-q.ExitChan:
+	case <-q.exitChan:
 		goto exit
 	}
 
@@ -204,7 +209,7 @@ func (q *Reader) lookupdLoop() {
 			q.queryLookupd()
 		case <-q.lookupdRecheckChan:
 			q.queryLookupd()
-		case <-q.ExitChan:
+		case <-q.exitChan:
 			goto exit
 		}
 	}
@@ -212,6 +217,7 @@ func (q *Reader) lookupdLoop() {
 exit:
 	ticker.Stop()
 	log.Printf("exiting lookupdLoop")
+	q.wg.Done()
 }
 
 // make an HTTP req to the /lookup endpoint of one of the
@@ -622,7 +628,7 @@ func (q *Reader) rdyLoop() {
 			}
 		case <-redistributeTicker.C:
 			q.redistributeRDY()
-		case <-q.ExitChan:
+		case <-q.exitChan:
 			goto exit
 		}
 	}
@@ -633,6 +639,7 @@ exit:
 		backoffTimer.Stop()
 	}
 	log.Printf("rdyLoop exiting")
+	q.wg.Done()
 }
 
 func (q *Reader) updateRDY(c *Conn, count int64) error {
@@ -748,7 +755,9 @@ func (q *Reader) redistributeRDY() {
 	}
 }
 
-// Stop will gracefully stop the Reader
+// Stop will initiate a graceful stop of the Reader (permanent)
+//
+// NOTE: receive on StopChan to block until this process completes
 func (q *Reader) Stop() {
 	if !atomic.CompareAndSwapInt32(&q.stopFlag, 0, 1) {
 		return
@@ -797,7 +806,7 @@ func (q *Reader) handlerLoop(handler Handler) {
 		if !ok {
 			log.Printf("Handler closing")
 			if atomic.AddInt32(&q.runningHandlers, -1) == 0 {
-				close(q.ExitChan)
+				q.exit()
 			}
 			break
 		}
@@ -837,4 +846,10 @@ func (q *Reader) shouldFailMessage(message *Message, handler interface{}) bool {
 		return true
 	}
 	return false
+}
+
+func (q *Reader) exit() {
+	close(q.exitChan)
+	q.wg.Wait()
+	close(q.StopChan)
 }
