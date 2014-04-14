@@ -52,7 +52,7 @@ type Conn struct {
 	channel string
 	config  *Config
 
-	net.Conn
+	conn    *net.TCPConn
 	tlsConn *tls.Conn
 	addr    string
 
@@ -132,7 +132,7 @@ func (c *Conn) Connect() (*IdentifyResponse, error) {
 	if err != nil {
 		return nil, err
 	}
-	c.Conn = conn
+	c.conn = conn.(*net.TCPConn)
 	c.r = conn
 	c.w = conn
 
@@ -159,10 +159,10 @@ func (c *Conn) Close() error {
 	// so that external users dont need
 	// to do this dance...
 	// (would only happen if the dial failed)
-	if c.Conn == nil {
+	if c.conn == nil {
 		return nil
 	}
-	return c.Conn.Close()
+	return c.conn.Close()
 }
 
 // Stop gracefully initiates connection close
@@ -207,8 +207,8 @@ func (c *Conn) LastMessageTime() time.Time {
 }
 
 // Address returns the configured destination nsqd address
-func (c *Conn) Address() string {
-	return c.addr
+func (c *Conn) RemoteAddr() net.Addr {
+	return c.conn.RemoteAddr()
 }
 
 // String returns the fully-qualified address/topic/channel
@@ -218,13 +218,13 @@ func (c *Conn) String() string {
 
 // Read performs a deadlined read on the underlying TCP connection
 func (c *Conn) Read(p []byte) (int, error) {
-	c.SetReadDeadline(time.Now().Add(c.config.readTimeout))
+	c.conn.SetReadDeadline(time.Now().Add(c.config.readTimeout))
 	return c.r.Read(p)
 }
 
 // Write performs a deadlined write on the underlying TCP connection
 func (c *Conn) Write(p []byte) (int, error) {
-	c.SetWriteDeadline(time.Now().Add(c.config.writeTimeout))
+	c.conn.SetWriteDeadline(time.Now().Add(c.config.writeTimeout))
 	return c.w.Write(p)
 }
 
@@ -349,7 +349,7 @@ func (c *Conn) identify() (*IdentifyResponse, error) {
 }
 
 func (c *Conn) upgradeTLS(conf *tls.Config) error {
-	c.tlsConn = tls.Client(c.Conn, conf)
+	c.tlsConn = tls.Client(c.conn, conf)
 	err := c.tlsConn.Handshake()
 	if err != nil {
 		return err
@@ -367,7 +367,7 @@ func (c *Conn) upgradeTLS(conf *tls.Config) error {
 }
 
 func (c *Conn) upgradeDeflate(level int) error {
-	conn := c.Conn
+	conn := net.Conn(c.conn)
 	if c.tlsConn != nil {
 		conn = c.tlsConn
 	}
@@ -385,7 +385,7 @@ func (c *Conn) upgradeDeflate(level int) error {
 }
 
 func (c *Conn) upgradeSnappy() error {
-	conn := c.Conn
+	conn := net.Conn(c.conn)
 	if c.tlsConn != nil {
 		conn = c.tlsConn
 	}
@@ -558,7 +558,7 @@ func (c *Conn) close() {
 	c.stopper.Do(func() {
 		log.Printf("[%s] beginning close", c)
 		close(c.exitChan)
-		c.Conn.(*net.TCPConn).CloseRead()
+		c.conn.CloseRead()
 
 		c.wg.Add(1)
 		go c.cleanup()
@@ -605,7 +605,7 @@ func (c *Conn) waitForCleanup() {
 	// this blocks until readLoop and writeLoop
 	// (and cleanup goroutine above) have exited
 	c.wg.Wait()
-	c.Conn.(*net.TCPConn).CloseWrite()
+	c.conn.CloseWrite()
 	log.Printf("[%s] clean close complete", c)
 	c.CloseCB(c)
 }
