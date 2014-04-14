@@ -11,6 +11,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -408,7 +409,9 @@ func (c *Conn) readLoop() {
 
 		frameType, data, err := c.ReadUnpackedResponse()
 		if err != nil {
-			c.IOErrorCB(c, err)
+			if !strings.Contains(err.Error(), "use of closed network connection") {
+				c.IOErrorCB(c, err)
+			}
 			goto exit
 		}
 
@@ -555,6 +558,7 @@ func (c *Conn) close() {
 	c.stopper.Do(func() {
 		log.Printf("[%s] beginning close", c)
 		close(c.exitChan)
+		c.Conn.(*net.TCPConn).CloseRead()
 
 		c.wg.Add(1)
 		go c.cleanup()
@@ -601,8 +605,7 @@ func (c *Conn) waitForCleanup() {
 	// this blocks until readLoop and writeLoop
 	// (and cleanup goroutine above) have exited
 	c.wg.Wait()
-	// actually close the underlying connection
-	c.Close()
+	c.Conn.(*net.TCPConn).CloseWrite()
 	log.Printf("[%s] clean close complete", c)
 	c.CloseCB(c)
 }
