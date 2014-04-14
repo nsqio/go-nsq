@@ -141,7 +141,7 @@ func (q *Reader) IsStarved() bool {
 	for _, conn := range q.conns() {
 		threshold := int64(float64(atomic.LoadInt64(&conn.lastRdyCount)) * 0.85)
 		inFlight := atomic.LoadInt64(&conn.messagesInFlight)
-		if inFlight >= threshold && inFlight > 0 && atomic.LoadInt32(&conn.stopFlag) != 1 {
+		if inFlight >= threshold && inFlight > 0 && !conn.IsClosing() {
 			return true
 		}
 	}
@@ -403,7 +403,7 @@ func (q *Reader) onConnectionResponse(c *Conn, data []byte) {
 		// we can assume we will not receive any more messages over this channel
 		// (but we can still write back responses)
 		log.Printf("[%s] received ACK from nsqd - now in CLOSE_WAIT", c)
-		c.Stop()
+		c.Close()
 	}
 }
 
@@ -417,7 +417,7 @@ func (q *Reader) onConnectionHeartbeat(c *Conn) {
 
 func (q *Reader) onConnectionIOError(c *Conn, err error) {
 	log.Printf("[%s] IO Error - %s", c, err)
-	c.Stop()
+	c.Close()
 }
 
 func (q *Reader) onConnectionClosed(c *Conn) {
@@ -636,7 +636,7 @@ exit:
 }
 
 func (q *Reader) updateRDY(c *Conn, count int64) error {
-	if c.IsStopping() {
+	if c.IsClosing() {
 		return nil
 	}
 
@@ -689,7 +689,6 @@ func (q *Reader) sendRDY(c *Conn, count int64) error {
 	err := c.WriteCommand(Ready(int(count)))
 	if err != nil {
 		log.Printf("[%s] error sending RDY %d - %s", c, count, err)
-		c.Stop()
 		return err
 	}
 	return nil
@@ -764,7 +763,6 @@ func (q *Reader) Stop() {
 			err := c.WriteCommand(StartClose())
 			if err != nil {
 				log.Printf("[%s] failed to start close - %s", c, err.Error())
-				c.Stop()
 			}
 		}
 

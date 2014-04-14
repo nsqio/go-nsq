@@ -99,9 +99,9 @@ type Conn struct {
 	exitChan        chan int
 	drainReady      chan int
 
-	stopFlag int32
-	stopper  sync.Once
-	wg       sync.WaitGroup
+	closeFlag int32
+	stopper   sync.Once
+	wg        sync.WaitGroup
 
 	readLoopRunning int32
 }
@@ -154,28 +154,20 @@ func (c *Conn) Connect() (*IdentifyResponse, error) {
 	return resp, nil
 }
 
-// Close idempotently closes the connection
+// Close idempotently initiates connection close
 func (c *Conn) Close() error {
-	// so that external users dont need
-	// to do this dance...
-	// (would only happen if the dial failed)
-	if c.conn == nil {
-		return nil
+	atomic.StoreInt32(&c.closeFlag, 1)
+	if c.conn != nil && atomic.LoadInt64(&c.messagesInFlight) == 0 {
+		return c.conn.CloseRead()
 	}
-	return c.conn.Close()
+	return nil
 }
 
-// Stop gracefully initiates connection close
-// allowing in-flight messages to finish
-func (c *Conn) Stop() {
-	atomic.StoreInt32(&c.stopFlag, 1)
-}
-
-// IsStopping indicates whether or not the
+// IsClosing indicates whether or not the
 // connection is currently in the processing of
 // gracefully closing
-func (c *Conn) IsStopping() bool {
-	return atomic.LoadInt32(&c.stopFlag) == 1
+func (c *Conn) IsClosing() bool {
+	return atomic.LoadInt32(&c.closeFlag) == 1
 }
 
 // RDY returns the current RDY count
@@ -403,7 +395,7 @@ func (c *Conn) upgradeSnappy() error {
 
 func (c *Conn) readLoop() {
 	for {
-		if atomic.LoadInt32(&c.stopFlag) == 1 {
+		if atomic.LoadInt32(&c.closeFlag) == 1 {
 			goto exit
 		}
 
@@ -517,7 +509,7 @@ func (c *Conn) writeLoop() {
 			}
 
 			if msgsInFlight == 0 &&
-				atomic.LoadInt32(&c.stopFlag) == 1 {
+				atomic.LoadInt32(&c.closeFlag) == 1 {
 				c.close()
 				continue
 			}
@@ -534,7 +526,7 @@ func (c *Conn) close() {
 	//
 	//     1. CLOSE cmd sent to nsqd
 	//     2. CLOSE_WAIT response received from nsqd
-	//     3. set c.stopFlag
+	//     3. set c.closeFlag
 	//     4. readLoop() exits
 	//         a. if messages-in-flight > 0 delay close()
 	//             i. writeLoop() continues receiving on c.finishedMessages chan
