@@ -427,7 +427,7 @@ func (c *Conn) writeLoop() {
 		select {
 		case <-c.exitChan:
 			log.Printf("[%s] breaking out of writeLoop", c)
-			// Indicate drainReady because we will not pull any more off finishedMessages
+			// Indicate drainReady because we will not pull any more off msgResponseChan
 			close(c.drainReady)
 			goto exit
 		case cmd := <-c.cmdChan:
@@ -475,7 +475,7 @@ func (c *Conn) close() {
 	//     3. set c.closeFlag
 	//     4. readLoop() exits
 	//         a. if messages-in-flight > 0 delay close()
-	//             i. writeLoop() continues receiving on c.finishedMessages chan
+	//             i. writeLoop() continues receiving on c.msgResponseChan chan
 	//                 x. when messages-in-flight == 0 call close()
 	//         b. else call close() immediately
 	//     5. c.exitChan close
@@ -484,7 +484,7 @@ func (c *Conn) close() {
 	//     6a. launch cleanup() goroutine (we're racing with intraprocess
 	//        routed messages, see comments below)
 	//         a. wait on c.drainReady
-	//         b. loop and receive on c.finishedMessages chan
+	//         b. loop and receive on c.msgResponseChan chan
 	//            until messages-in-flight == 0
 	//            i. ensure that readLoop has exited
 	//     6b. launch waitForCleanup() goroutine

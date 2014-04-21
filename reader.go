@@ -47,9 +47,9 @@ var readerCount int64
 // reconnection) to any discovered nsqds.
 type Reader struct {
 	// 64bit atomic vars need to be first for proper alignment on 32bit platforms
-	MessagesReceived uint64 // an atomic counter - # of messages received
-	MessagesFinished uint64 // an atomic counter - # of messages FINished
-	MessagesRequeued uint64 // an atomic counter - # of messages REQueued
+	messagesReceived uint64
+	messagesFinished uint64
+	messagesRequeued uint64
 	totalRdyCount    int64
 	backoffDuration  int64
 
@@ -363,7 +363,7 @@ func (q *Reader) ConnectToNSQ(addr string) error {
 
 func (q *Reader) onConnMessage(c *Conn, msg *Message) {
 	atomic.AddInt64(&q.totalRdyCount, -1)
-	atomic.AddUint64(&q.MessagesReceived, 1)
+	atomic.AddUint64(&q.messagesReceived, 1)
 	q.incomingMessages <- msg
 	q.rdyChan <- c
 }
@@ -372,7 +372,7 @@ func (q *Reader) onConnMessageFinished(c *Conn, msg *Message) {
 	if q.config.verbose {
 		log.Printf("[%s] finishing %s", c, msg.Id)
 	}
-	atomic.AddUint64(&q.MessagesFinished, 1)
+	atomic.AddUint64(&q.messagesFinished, 1)
 	q.backoffChan <- true
 }
 
@@ -380,7 +380,7 @@ func (q *Reader) onConnMessageRequeued(c *Conn, msg *Message) {
 	if q.config.verbose {
 		log.Printf("[%s] requeuing %s", c, msg.Id)
 	}
-	atomic.AddUint64(&q.MessagesRequeued, 1)
+	atomic.AddUint64(&q.messagesRequeued, 1)
 	q.backoffChan <- false
 }
 
