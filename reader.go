@@ -809,11 +809,7 @@ func (q *Reader) handlerLoop(handler Handler) {
 	for {
 		message, ok := <-q.incomingMessages
 		if !ok {
-			log.Printf("Handler closing")
-			if atomic.AddInt32(&q.runningHandlers, -1) == 0 {
-				q.exit()
-			}
-			break
+			goto exit
 		}
 
 		if q.shouldFailMessage(message, handler) {
@@ -834,6 +830,12 @@ func (q *Reader) handlerLoop(handler Handler) {
 		if !message.IsAutoResponseDisabled() {
 			message.Finish()
 		}
+	}
+
+exit:
+	log.Printf("[%s] stopping Handler", q)
+	if atomic.AddInt32(&q.runningHandlers, -1) == 0 {
+		q.exit()
 	}
 }
 
