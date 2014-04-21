@@ -34,6 +34,8 @@ type FailedMessageLogger interface {
 	LogFailedMessage(message *Message)
 }
 
+var readerCount int64
+
 // Reader is a high-level type to consume from NSQ.
 //
 // A Reader instance is supplied a Handler that will be executed
@@ -53,6 +55,7 @@ type Reader struct {
 
 	sync.RWMutex
 
+	id      int64
 	topic   string
 	channel string
 	config  *Config
@@ -97,6 +100,8 @@ func NewReader(topic string, channel string, config *Config) (*Reader, error) {
 	}
 
 	q := &Reader{
+		id: atomic.AddInt64(&readerCount, 1),
+
 		topic:   topic,
 		channel: channel,
 		config:  config,
