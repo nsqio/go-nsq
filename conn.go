@@ -46,7 +46,7 @@ type Conn struct {
 	lastRdyCount     int64
 	lastMsgTimestamp int64
 
-	sync.Mutex
+	mtx sync.Mutex
 
 	config *Config
 
@@ -187,7 +187,7 @@ func (c *Conn) Write(p []byte) (int, error) {
 }
 
 func (c *Conn) WriteCommand(cmd *Command) error {
-	c.Lock()
+	c.mtx.Lock()
 
 	_, err := cmd.WriteTo(c)
 	if err != nil {
@@ -196,7 +196,7 @@ func (c *Conn) WriteCommand(cmd *Command) error {
 	err = c.Flush()
 
 exit:
-	c.Unlock()
+	c.mtx.Unlock()
 	if err != nil {
 		c.Delegate.OnIOError(c, err)
 	}
