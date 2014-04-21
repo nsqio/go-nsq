@@ -23,14 +23,14 @@ type Writer struct {
 	heartbeatChan chan int
 	closeChan     chan int
 
-	concurrentWriters int32
-
 	transactionChan chan *WriterTransaction
 	transactions    []*WriterTransaction
 	state           int32
-	stopFlag        int32
-	exitChan        chan int
-	wg              sync.WaitGroup
+
+	concurrentWriters int32
+	stopFlag          int32
+	exitChan          chan int
+	wg                sync.WaitGroup
 }
 
 // WriterTransaction is returned by the async publish methods
@@ -70,7 +70,9 @@ func (w *Writer) String() string {
 	return w.addr
 }
 
-// Stop disconnects and permanently stops the Writer
+// Stop initiates a graceful stop of the Writer (permanent)
+//
+// NOTE: receive on StopChan to block until this process completes
 func (w *Writer) Stop() {
 	if !atomic.CompareAndSwapInt32(&w.stopFlag, 0, 1) {
 		return
@@ -175,7 +177,7 @@ func (w *Writer) connect() error {
 
 	log.Printf("[%s] connecting...", w)
 
-	conn := NewConn(w.addr, "", "", w.config)
+	conn := NewConn(w.addr, w.config)
 	conn.ResponseCB = func(c *Conn, data []byte) { w.responseChan <- data }
 	conn.ErrorCB = func(c *Conn, data []byte) { w.errorChan <- data }
 	conn.HeartbeatCB = func(c *Conn) { w.heartbeatChan <- 1 }

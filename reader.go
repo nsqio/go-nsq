@@ -300,7 +300,7 @@ func (q *Reader) ConnectToNSQ(addr string) error {
 
 	log.Printf("[%s] connecting to nsqd", addr)
 
-	conn := NewConn(addr, q.topic, q.channel, q.config)
+	conn := NewConn(addr, q.config)
 	conn.MessageCB = func(c *Conn, msg *Message) {
 		q.onConnectionMessage(c, msg)
 	}

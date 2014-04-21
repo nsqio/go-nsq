@@ -48,9 +48,7 @@ type Conn struct {
 
 	sync.Mutex
 
-	topic   string
-	channel string
-	config  *Config
+	config *Config
 
 	conn    *net.TCPConn
 	tlsConn *tls.Conn
@@ -107,13 +105,11 @@ type Conn struct {
 }
 
 // NewConn returns a new Conn instance
-func NewConn(addr string, topic string, channel string, config *Config) *Conn {
+func NewConn(addr string, config *Config) *Conn {
 	return &Conn{
 		addr: addr,
 
-		topic:   topic,
-		channel: channel,
-		config:  config,
+		config: config,
 
 		maxRdyCount:      2500,
 		lastMsgTimestamp: time.Now().UnixNano(),
@@ -203,9 +199,9 @@ func (c *Conn) RemoteAddr() net.Addr {
 	return c.conn.RemoteAddr()
 }
 
-// String returns the fully-qualified address/topic/channel
+// String returns the fully-qualified address
 func (c *Conn) String() string {
-	return fmt.Sprintf("%s/%s/%s", c.addr, c.topic, c.channel)
+	return c.addr
 }
 
 // Read performs a deadlined read on the underlying TCP connection
