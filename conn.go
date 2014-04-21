@@ -54,37 +54,7 @@ type Conn struct {
 	tlsConn *tls.Conn
 	addr    string
 
-	// ResponseCB is called when the connection
-	// receives a FrameTypeResponse from nsqd
-	ResponseCB func(*Conn, []byte)
-
-	// ErrorCB is called when the connection
-	// receives a FrameTypeError from nsqd
-	ErrorCB func(*Conn, []byte)
-
-	// MessageCB is called when the connection
-	// receives a FrameTypeMessage from nsqd
-	MessageCB func(*Conn, *Message)
-
-	// MessageFinishedCB is called when the connection
-	// handles a FIN command from a message handler
-	MessageFinishedCB func(*Conn, *Message)
-
-	// MessageRequeuedCB is called when the connection
-	// handles a REQ command from a message handler
-	MessageRequeuedCB func(*Conn, *Message)
-
-	// IOErrorCB is called when the connection experiences
-	// a low-level TCP transport error
-	IOErrorCB func(*Conn, error)
-
-	// HeartbeatCB is called when the connection
-	// receives a heartbeat from nsqd
-	HeartbeatCB func(*Conn)
-
-	// CloseCB is called when the connection
-	// closes, after all cleanup
-	CloseCB func(*Conn)
+	Delegate ConnDelegate
 
 	r io.Reader
 	w io.Writer
@@ -228,7 +198,7 @@ func (c *Conn) WriteCommand(cmd *Command) error {
 exit:
 	c.Unlock()
 	if err != nil {
-		c.IOErrorCB(c, err)
+		c.Delegate.OnIOError(c, err)
 	}
 	return err
 }
@@ -398,16 +368,16 @@ func (c *Conn) readLoop() {
 		frameType, data, err := c.ReadUnpackedResponse()
 		if err != nil {
 			if !strings.Contains(err.Error(), "use of closed network connection") {
-				c.IOErrorCB(c, err)
+				c.Delegate.OnIOError(c, err)
 			}
 			goto exit
 		}
 
 		if frameType == FrameTypeResponse && bytes.Equal(data, []byte("_heartbeat_")) {
-			c.HeartbeatCB(c)
+			c.Delegate.OnHeartbeat(c)
 			err := c.WriteCommand(Nop())
 			if err != nil {
-				c.IOErrorCB(c, err)
+				c.Delegate.OnIOError(c, err)
 				goto exit
 			}
 			continue
@@ -415,43 +385,23 @@ func (c *Conn) readLoop() {
 
 		switch frameType {
 		case FrameTypeResponse:
-			c.ResponseCB(c, data)
+			c.Delegate.OnResponse(c, data)
 		case FrameTypeMessage:
 			msg, err := DecodeMessage(data)
 			if err != nil {
-				c.IOErrorCB(c, err)
+				c.Delegate.OnIOError(c, err)
 				goto exit
 			}
-			msg.FinishCB = func(m *Message) {
-				c.msgResponseChan <- &msgResponse{m, Finish(m.Id), true}
-			}
-			msg.RequeueCB = func(m *Message, delay time.Duration) {
-				if delay == -1 {
-					// linear delay
-					delay = c.config.defaultRequeueDelay * time.Duration(m.Attempts)
-					// bound the requeueDelay to configured max
-					if delay > c.config.maxRequeueDelay {
-						delay = c.config.maxRequeueDelay
-					}
-				}
-				c.msgResponseChan <- &msgResponse{m, Requeue(m.Id, delay), false}
-			}
-			msg.TouchCB = func(m *Message) {
-				select {
-				case c.cmdChan <- Touch(m.Id):
-				case <-c.exitChan:
-				}
-			}
-
+			msg.Delegate = &connMessageDelegate{c}
 			atomic.AddInt64(&c.rdyCount, -1)
 			atomic.AddInt64(&c.messagesInFlight, 1)
 			atomic.StoreInt64(&c.lastMsgTimestamp, time.Now().UnixNano())
 
-			c.MessageCB(c, msg)
+			c.Delegate.OnMessage(c, msg)
 		case FrameTypeError:
-			c.ErrorCB(c, data)
+			c.Delegate.OnError(c, data)
 		default:
-			c.IOErrorCB(c, fmt.Errorf("unknown frame type %d", frameType))
+			c.Delegate.OnIOError(c, fmt.Errorf("unknown frame type %d", frameType))
 		}
 	}
 
@@ -499,9 +449,9 @@ func (c *Conn) writeLoop() {
 			}
 
 			if resp.success {
-				c.MessageFinishedCB(c, resp.msg)
+				c.Delegate.OnMessageFinished(c, resp.msg)
 			} else {
-				c.MessageRequeuedCB(c, resp.msg)
+				c.Delegate.OnMessageRequeued(c, resp.msg)
 			}
 
 			if msgsInFlight == 0 &&
@@ -541,7 +491,7 @@ func (c *Conn) close() {
 	//         b. wait on waitgroup (covers readLoop() and writeLoop()
 	//            and cleanup goroutine)
 	//         c. underlying TCP connection close
-	//         d. trigger CloseCB()
+	//         d. trigger Delegate OnClose()
 	//
 	c.stopper.Do(func() {
 		log.Printf("[%s] beginning close", c)
@@ -595,5 +545,28 @@ func (c *Conn) waitForCleanup() {
 	c.wg.Wait()
 	c.conn.CloseWrite()
 	log.Printf("[%s] clean close complete", c)
-	c.CloseCB(c)
+	c.Delegate.OnClose(c)
+}
+
+func (c *Conn) onMessageFinish(m *Message) {
+	c.msgResponseChan <- &msgResponse{m, Finish(m.Id), true}
+}
+
+func (c *Conn) onMessageRequeue(m *Message, delay time.Duration) {
+	if delay == -1 {
+		// linear delay
+		delay = c.config.defaultRequeueDelay * time.Duration(m.Attempts)
+		// bound the requeueDelay to configured max
+		if delay > c.config.maxRequeueDelay {
+			delay = c.config.maxRequeueDelay
+		}
+	}
+	c.msgResponseChan <- &msgResponse{m, Requeue(m.Id, delay), false}
+}
+
+func (c *Conn) onMessageTouch(m *Message) {
+	select {
+	case c.cmdChan <- Touch(m.Id):
+	case <-c.exitChan:
+	}
 }

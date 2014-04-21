@@ -178,11 +178,7 @@ func (w *Writer) connect() error {
 	log.Printf("[%s] connecting...", w)
 
 	conn := NewConn(w.addr, w.config)
-	conn.ResponseCB = func(c *Conn, data []byte) { w.responseChan <- data }
-	conn.ErrorCB = func(c *Conn, data []byte) { w.errorChan <- data }
-	conn.HeartbeatCB = func(c *Conn) { w.heartbeatChan <- 1 }
-	conn.IOErrorCB = func(c *Conn, err error) { w.ioErrorChan <- err }
-	conn.CloseCB = func(c *Conn) { w.closeChan <- 1 }
+	conn.Delegate = &writerConnDelegate{w}
 
 	resp, err := conn.Connect()
 	if err != nil {
@@ -294,3 +290,9 @@ func (w *Writer) transactionCleanup() {
 		}
 	}
 }
+
+func (w *Writer) onConnResponse(c *Conn, data []byte) { w.responseChan <- data }
+func (w *Writer) onConnError(c *Conn, data []byte)    { w.errorChan <- data }
+func (w *Writer) onConnHeartbeat(c *Conn)             { w.heartbeatChan <- 1 }
+func (w *Writer) onConnIOError(c *Conn, err error)    { w.ioErrorChan <- err }
+func (w *Writer) onConnClose(c *Conn)                 { w.closeChan <- 1 }

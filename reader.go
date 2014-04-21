@@ -306,30 +306,7 @@ func (q *Reader) ConnectToNSQ(addr string) error {
 	log.Printf("[%s] connecting to nsqd", addr)
 
 	conn := NewConn(addr, q.config)
-	conn.MessageCB = func(c *Conn, msg *Message) {
-		q.onConnectionMessage(c, msg)
-	}
-	conn.MessageFinishedCB = func(c *Conn, msg *Message) {
-		q.onConnectionMessageFinished(c, msg)
-	}
-	conn.MessageRequeuedCB = func(c *Conn, msg *Message) {
-		q.onConnectionMessageRequeued(c, msg)
-	}
-	conn.ResponseCB = func(c *Conn, data []byte) {
-		q.onConnectionResponse(c, data)
-	}
-	conn.ErrorCB = func(c *Conn, data []byte) {
-		q.onConnectionError(c, data)
-	}
-	conn.HeartbeatCB = func(c *Conn) {
-		q.onConnectionHeartbeat(c)
-	}
-	conn.IOErrorCB = func(c *Conn, err error) {
-		q.onConnectionIOError(c, err)
-	}
-	conn.CloseCB = func(c *Conn) {
-		q.onConnectionClosed(c)
-	}
+	conn.Delegate = &readerConnDelegate{q}
 
 	cleanupConnection := func() {
 		q.Lock()
@@ -384,14 +361,14 @@ func (q *Reader) ConnectToNSQ(addr string) error {
 	return nil
 }
 
-func (q *Reader) onConnectionMessage(c *Conn, msg *Message) {
+func (q *Reader) onConnMessage(c *Conn, msg *Message) {
 	atomic.AddInt64(&q.totalRdyCount, -1)
 	atomic.AddUint64(&q.MessagesReceived, 1)
 	q.incomingMessages <- msg
 	q.rdyChan <- c
 }
 
-func (q *Reader) onConnectionMessageFinished(c *Conn, msg *Message) {
+func (q *Reader) onConnMessageFinished(c *Conn, msg *Message) {
 	if q.config.verbose {
 		log.Printf("[%s] finishing %s", c, msg.Id)
 	}
@@ -399,7 +376,7 @@ func (q *Reader) onConnectionMessageFinished(c *Conn, msg *Message) {
 	q.backoffChan <- true
 }
 
-func (q *Reader) onConnectionMessageRequeued(c *Conn, msg *Message) {
+func (q *Reader) onConnMessageRequeued(c *Conn, msg *Message) {
 	if q.config.verbose {
 		log.Printf("[%s] requeuing %s", c, msg.Id)
 	}
@@ -407,7 +384,7 @@ func (q *Reader) onConnectionMessageRequeued(c *Conn, msg *Message) {
 	q.backoffChan <- false
 }
 
-func (q *Reader) onConnectionResponse(c *Conn, data []byte) {
+func (q *Reader) onConnResponse(c *Conn, data []byte) {
 	switch {
 	case bytes.Equal(data, []byte("CLOSE_WAIT")):
 		// server is ready for us to close (it ack'd our StartClose)
@@ -418,20 +395,20 @@ func (q *Reader) onConnectionResponse(c *Conn, data []byte) {
 	}
 }
 
-func (q *Reader) onConnectionError(c *Conn, data []byte) {
+func (q *Reader) onConnError(c *Conn, data []byte) {
 	log.Printf("[%s] error from nsqd %s", c, data)
 }
 
-func (q *Reader) onConnectionHeartbeat(c *Conn) {
+func (q *Reader) onConnHeartbeat(c *Conn) {
 	log.Printf("[%s] heartbeat received", c)
 }
 
-func (q *Reader) onConnectionIOError(c *Conn, err error) {
+func (q *Reader) onConnIOError(c *Conn, err error) {
 	log.Printf("[%s] IO Error - %s", c, err)
 	c.Close()
 }
 
-func (q *Reader) onConnectionClosed(c *Conn) {
+func (q *Reader) onConnClose(c *Conn) {
 	var hasRDYRetryTimer bool
 
 	// remove this connections RDY count from the reader's total

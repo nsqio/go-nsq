@@ -22,9 +22,7 @@ type Message struct {
 	Timestamp int64
 	Attempts  uint16
 
-	RequeueCB func(*Message, time.Duration)
-	TouchCB   func(*Message)
-	FinishCB  func(*Message)
+	Delegate MessageDelegate
 
 	autoResponseDisabled int32
 	responded            int32
@@ -67,7 +65,7 @@ func (m *Message) Finish() {
 	if m.HasResponded() {
 		return
 	}
-	m.FinishCB(m)
+	m.Delegate.OnFinish(m)
 	atomic.StoreInt32(&m.responded, 1)
 }
 
@@ -77,7 +75,7 @@ func (m *Message) Touch() {
 	if m.HasResponded() {
 		return
 	}
-	m.TouchCB(m)
+	m.Delegate.OnTouch(m)
 }
 
 // Requeue sends a REQ command to the nsqd which
@@ -94,7 +92,7 @@ func (m *Message) doRequeue(delay time.Duration, backoff bool) {
 	if m.HasResponded() {
 		return
 	}
-	m.RequeueCB(m, delay)
+	m.Delegate.OnRequeue(m, delay)
 	atomic.StoreInt32(&m.responded, 1)
 }
 
