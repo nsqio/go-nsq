@@ -187,13 +187,17 @@ func TestReaderBackoff(t *testing.T) {
 
 	logger := log.New(ioutil.Discard, "", log.LstdFlags)
 
+	var mgood bytes.Buffer
 	msgIdGood := MessageID{'1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'a', 's', 'd', 'f', 'g', 'h'}
 	msgGood := NewMessage(msgIdGood, []byte("good"))
-	msgBytesGood, _ := msgGood.EncodeBytes()
+	msgGood.WriteTo(&mgood)
+	msgBytesGood := mgood.Bytes()
 
+	var mbad bytes.Buffer
 	msgIdBad := MessageID{'z', 'x', 'c', 'v', 'b', '6', '7', '8', '9', '0', 'a', 's', 'd', 'f', 'g', 'h'}
 	msgBad := NewMessage(msgIdBad, []byte("bad"))
-	msgBytesBad, _ := msgBad.EncodeBytes()
+	msgBad.WriteTo(&mbad)
+	msgBytesBad := mbad.Bytes()
 
 	script := []instruction{
 		// SUB

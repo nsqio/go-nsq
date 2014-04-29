@@ -105,74 +105,57 @@ func (m *Message) doRequeue(delay time.Duration, backoff bool) {
 	atomic.StoreInt32(&m.responded, 1)
 }
 
-// EncodeBytes serializes the message into a new, returned, []byte
-func (m *Message) EncodeBytes() ([]byte, error) {
-	var buf bytes.Buffer
-	err := m.Write(&buf)
-	if err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-// Write serializes the message into the supplied writer.
+// WriteTo implements the WriterTo interface and serializes
+// the message into the supplied writer.
 //
-// It is suggested that the target Writer is buffered to avoid performing many system calls.
-func (m *Message) Write(w io.Writer) error {
-	err := binary.Write(w, binary.BigEndian, &m.Timestamp)
+// It is suggested that the target Writer is buffered to
+// avoid performing many system calls.
+func (m *Message) WriteTo(w io.Writer) (int64, error) {
+	var buf [10]byte
+	var total int64
+
+	binary.BigEndian.PutUint64(buf[:8], uint64(m.Timestamp))
+	binary.BigEndian.PutUint16(buf[8:10], uint16(m.Attempts))
+
+	n, err := w.Write(buf[:])
+	total += int64(n)
 	if err != nil {
-		return err
+		return total, err
 	}
 
-	err = binary.Write(w, binary.BigEndian, &m.Attempts)
+	n, err = w.Write(m.Id[:])
+	total += int64(n)
 	if err != nil {
-		return err
+		return total, err
 	}
 
-	_, err = w.Write(m.Id[:])
+	n, err = w.Write(m.Body)
+	total += int64(n)
 	if err != nil {
-		return err
+		return total, err
 	}
 
-	_, err = w.Write(m.Body)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return total, nil
 }
 
 // DecodeMessage deseralizes data (as []byte) and creates a new Message
-func DecodeMessage(byteBuf []byte) (*Message, error) {
-	var timestamp int64
-	var attempts uint16
+func DecodeMessage(b []byte) (*Message, error) {
 	var msg Message
 
-	buf := bytes.NewBuffer(byteBuf)
+	msg.Timestamp = int64(binary.BigEndian.Uint64(b[:8]))
+	msg.Attempts = binary.BigEndian.Uint16(b[8:10])
 
-	err := binary.Read(buf, binary.BigEndian, &timestamp)
+	buf := bytes.NewBuffer(b[10:])
+
+	_, err := io.ReadFull(buf, msg.Id[:])
 	if err != nil {
 		return nil, err
 	}
 
-	err = binary.Read(buf, binary.BigEndian, &attempts)
+	msg.Body, err = ioutil.ReadAll(buf)
 	if err != nil {
 		return nil, err
 	}
-
-	_, err = io.ReadFull(buf, msg.Id[:])
-	if err != nil {
-		return nil, err
-	}
-
-	body, err := ioutil.ReadAll(buf)
-	if err != nil {
-		return nil, err
-	}
-
-	msg.Body = body
-	msg.Timestamp = timestamp
-	msg.Attempts = attempts
 
 	return &msg, nil
 }
