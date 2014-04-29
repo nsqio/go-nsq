@@ -86,3 +86,14 @@ func UnpackResponse(response []byte) (int32, []byte, error) {
 
 	return int32(binary.BigEndian.Uint32(response)), response[4:], nil
 }
+
+// ReadUnpackedResponse reads and parses data from the underlying
+// TCP connection according to the NSQ TCP protocol spec and
+// returns the frameType, data or error
+func ReadUnpackedResponse(r io.Reader) (int32, []byte, error) {
+	resp, err := ReadResponse(r)
+	if err != nil {
+		return -1, nil, err
+	}
+	return UnpackResponse(resp)
+}

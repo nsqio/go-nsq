@@ -236,17 +236,6 @@ func (c *Conn) Flush() error {
 	return nil
 }
 
-// ReadUnpackedResponse reads and parses data from the underlying
-// TCP connection according to the NSQ TCP protocol spec and
-// returns the frameType, data or error
-func (c *Conn) ReadUnpackedResponse() (int32, []byte, error) {
-	resp, err := ReadResponse(c)
-	if err != nil {
-		return -1, nil, err
-	}
-	return UnpackResponse(resp)
-}
-
 func (c *Conn) identify() (*IdentifyResponse, error) {
 	ci := make(map[string]interface{})
 	ci["client_id"] = c.config.clientID
@@ -273,7 +262,7 @@ func (c *Conn) identify() (*IdentifyResponse, error) {
 		return nil, ErrIdentify{err.Error()}
 	}
 
-	frameType, data, err := c.ReadUnpackedResponse()
+	frameType, data, err := ReadUnpackedResponse(c)
 	if err != nil {
 		return nil, ErrIdentify{err.Error()}
 	}
@@ -340,7 +329,7 @@ func (c *Conn) upgradeTLS(conf *tls.Config) error {
 	}
 	c.r = c.tlsConn
 	c.w = c.tlsConn
-	frameType, data, err := c.ReadUnpackedResponse()
+	frameType, data, err := ReadUnpackedResponse(c)
 	if err != nil {
 		return err
 	}
@@ -358,7 +347,7 @@ func (c *Conn) upgradeDeflate(level int) error {
 	fw, _ := flate.NewWriter(conn, level)
 	c.r = flate.NewReader(conn)
 	c.w = fw
-	frameType, data, err := c.ReadUnpackedResponse()
+	frameType, data, err := ReadUnpackedResponse(c)
 	if err != nil {
 		return err
 	}
@@ -375,7 +364,7 @@ func (c *Conn) upgradeSnappy() error {
 	}
 	c.r = snappystream.NewReader(conn, snappystream.SkipVerifyChecksum)
 	c.w = snappystream.NewWriter(conn)
-	frameType, data, err := c.ReadUnpackedResponse()
+	frameType, data, err := ReadUnpackedResponse(c)
 	if err != nil {
 		return err
 	}
@@ -391,7 +380,7 @@ func (c *Conn) readLoop() {
 			goto exit
 		}
 
-		frameType, data, err := c.ReadUnpackedResponse()
+		frameType, data, err := ReadUnpackedResponse(c)
 		if err != nil {
 			if !strings.Contains(err.Error(), "use of closed network connection") {
 				c.log(LogLevelError, "IO error - %s", err)
