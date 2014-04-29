@@ -34,7 +34,7 @@ type FailedMessageLogger interface {
 	LogFailedMessage(message *Message)
 }
 
-var readerCount int64
+var instCount int64
 
 // Reader is a high-level type to consume from NSQ.
 //
@@ -54,6 +54,9 @@ type Reader struct {
 	backoffDuration  int64
 
 	mtx sync.RWMutex
+
+	logger *log.Logger
+	logLvl LogLevel
 
 	id      int64
 	topic   string
@@ -102,7 +105,7 @@ func NewReader(topic string, channel string, config *Config) (*Reader, error) {
 	}
 
 	q := &Reader{
-		id: atomic.AddInt64(&readerCount, 1),
+		id: atomic.AddInt64(&instCount, 1),
 
 		topic:   topic,
 		channel: channel,
@@ -134,6 +137,12 @@ func (q *Reader) conns() []*Conn {
 	}
 	q.mtx.RUnlock()
 	return conns
+}
+
+// SetLogger assigns the logger to use as well as a level
+func (q *Reader) SetLogger(logger *log.Logger, lvl LogLevel) {
+	q.logger = logger
+	q.logLvl = lvl
 }
 
 // ConnectionMaxInFlight calculates the per-connection max-in-flight count.
@@ -223,7 +232,7 @@ func (q *Reader) lookupdLoop() {
 
 exit:
 	ticker.Stop()
-	log.Printf("exiting lookupdLoop")
+	q.log(LogLevelInfo, "exiting lookupdLoop")
 	q.wg.Done()
 }
 
@@ -240,11 +249,11 @@ func (q *Reader) queryLookupd() {
 	q.lookupdQueryIndex = (q.lookupdQueryIndex + 1) % num
 	endpoint := fmt.Sprintf("http://%s/lookup?topic=%s", addr, url.QueryEscape(q.topic))
 
-	log.Printf("LOOKUPD: querying %s", endpoint)
+	q.log(LogLevelInfo, "querying nsqlookupd %s", endpoint)
 
 	data, err := ApiRequest(endpoint)
 	if err != nil {
-		log.Printf("ERROR: lookupd %s - %s", addr, err.Error())
+		q.log(LogLevelError, "error querying nsqlookupd (%s) - %s", addr, err)
 		return
 	}
 
@@ -276,7 +285,7 @@ func (q *Reader) queryLookupd() {
 		joined := net.JoinHostPort(address, strconv.Itoa(port))
 		err = q.ConnectToNSQ(joined)
 		if err != nil && err != ErrAlreadyConnected {
-			log.Printf("ERROR: failed to connect to nsqd (%s) - %s", joined, err.Error())
+			q.log(LogLevelError, "(%s) error connecting to nsqd - %s", joined, err)
 			continue
 		}
 	}
@@ -305,9 +314,11 @@ func (q *Reader) ConnectToNSQ(addr string) error {
 		return ErrAlreadyConnected
 	}
 
-	log.Printf("[%s] connecting to nsqd", addr)
+	q.log(LogLevelInfo, "(%s) connecting to nsqd", addr)
 
 	conn := NewConn(addr, q.config)
+	conn.SetLogger(q.logger, q.logLvl,
+		fmt.Sprintf("%3d [%s/%s] (%%s)", q.id, q.topic, q.channel))
 	conn.Delegate = &readerConnDelegate{q}
 
 	cleanupConnection := func() {
@@ -326,19 +337,10 @@ func (q *Reader) ConnectToNSQ(addr string) error {
 	}
 
 	if resp != nil {
-		log.Printf("[%s] IDENTIFY response: %+v", conn, resp)
 		if resp.MaxRdyCount < int64(q.maxInFlight()) {
-			log.Printf("[%s] max RDY count %d < reader max in flight %d, truncation possible",
-				conn, resp.MaxRdyCount, q.maxInFlight())
-		}
-		if resp.TLSv1 {
-			log.Printf("[%s] upgrading to TLS", conn)
-		}
-		if resp.Deflate {
-			log.Printf("[%s] upgrading to Deflate", conn)
-		}
-		if resp.Snappy {
-			log.Printf("[%s] upgrading to Snappy", conn)
+			q.log(LogLevelWarning,
+				"(%s) max RDY count %d < reader max in flight %d, truncation possible",
+				conn.String(), resp.MaxRdyCount, q.maxInFlight())
 		}
 	}
 
@@ -371,17 +373,11 @@ func (q *Reader) onConnMessage(c *Conn, msg *Message) {
 }
 
 func (q *Reader) onConnMessageFinished(c *Conn, msg *Message) {
-	if q.config.verbose {
-		log.Printf("[%s] finishing %s", c, msg.Id)
-	}
 	atomic.AddUint64(&q.messagesFinished, 1)
 	q.backoffChan <- true
 }
 
 func (q *Reader) onConnMessageRequeued(c *Conn, msg *Message) {
-	if q.config.verbose {
-		log.Printf("[%s] requeuing %s", c, msg.Id)
-	}
 	atomic.AddUint64(&q.messagesRequeued, 1)
 	q.backoffChan <- false
 }
@@ -392,21 +388,18 @@ func (q *Reader) onConnResponse(c *Conn, data []byte) {
 		// server is ready for us to close (it ack'd our StartClose)
 		// we can assume we will not receive any more messages over this channel
 		// (but we can still write back responses)
-		log.Printf("[%s] received ACK from nsqd - now in CLOSE_WAIT", c)
+		q.log(LogLevelInfo, "(%s) received CLOSE_WAIT from nsqd", c.String())
 		c.Close()
 	}
 }
 
 func (q *Reader) onConnError(c *Conn, data []byte) {
-	log.Printf("[%s] error from nsqd %s", c, data)
 }
 
 func (q *Reader) onConnHeartbeat(c *Conn) {
-	log.Printf("[%s] heartbeat received", c)
 }
 
 func (q *Reader) onConnIOError(c *Conn, err error) {
-	log.Printf("[%s] IO Error - %s", c, err)
 	c.Close()
 }
 
@@ -431,7 +424,7 @@ func (q *Reader) onConnClose(c *Conn) {
 	left := len(q.connections)
 	q.mtx.Unlock()
 
-	log.Printf("there are %d connections left alive", left)
+	q.log(LogLevelWarning, "there are %d connections left alive", left)
 
 	if (hasRDYRetryTimer || rdyCount > 0) &&
 		(left == q.maxInFlight() || q.inBackoff()) {
@@ -462,15 +455,14 @@ func (q *Reader) onConnClose(c *Conn) {
 		// there are no lookupd, try to reconnect after a bit
 		go func(addr string) {
 			for {
-				log.Printf("[%s] re-connecting in 15 seconds...", addr)
+				q.log(LogLevelInfo, "(%s) re-connecting in 15 seconds...", addr)
 				time.Sleep(15 * time.Second)
 				if atomic.LoadInt32(&q.stopFlag) == 1 {
 					break
 				}
 				err := q.ConnectToNSQ(addr)
 				if err != nil && err != ErrAlreadyConnected {
-					log.Printf("ERROR: failed to connect to %s - %s",
-						addr, err.Error())
+					q.log(LogLevelError, "(%s) error connecting to nsqd - %s", addr, err)
 					continue
 				}
 				break
@@ -527,7 +519,9 @@ func (q *Reader) rdyLoop() {
 				i++
 			}
 
-			log.Printf("[%s] backoff time expired, continuing with RDY 1...", choice)
+			q.log(LogLevelWarning,
+				"(%s) backoff timeout expired, sending RDY 1",
+				choice.String())
 			// while in backoff only ever let 1 message at a time through
 			q.updateRDY(choice, 1)
 		case c := <-q.rdyChan:
@@ -541,16 +535,12 @@ func (q *Reader) rdyLoop() {
 			count := q.ConnectionMaxInFlight()
 			// refill when at 1, or at 25%, or if connections have changed and we have too many RDY
 			if remain <= 1 || remain < (lastRdyCount/4) || (count > 0 && count < remain) {
-				if q.config.verbose {
-					log.Printf("[%s] sending RDY %d (%d remain from last RDY %d)",
-						c, count, remain, lastRdyCount)
-				}
+				q.log(LogLevelDebug, "(%s) sending RDY %d (%d remain from last RDY %d)",
+					c.String(), count, remain, lastRdyCount)
 				q.updateRDY(c, count)
 			} else {
-				if q.config.verbose {
-					log.Printf("[%s] skip sending RDY %d (%d remain out of last RDY %d)",
-						c, count, remain, lastRdyCount)
-				}
+				q.log(LogLevelDebug, "(%s) skip sending RDY %d (%d remain out of last RDY %d)",
+					c.String(), count, remain, lastRdyCount)
 			}
 		case success := <-q.backoffChan:
 			// prevent many async failures/successes from immediately resulting in
@@ -583,10 +573,8 @@ func (q *Reader) rdyLoop() {
 			// exit backoff
 			if backoffCounter == 0 && backoffUpdated {
 				count := q.ConnectionMaxInFlight()
+				q.log(LogLevelWarning, "exiting backoff, returning all to RDY %d", count)
 				for _, c := range q.conns() {
-					if q.config.verbose {
-						log.Printf("[%s] exiting backoff. returning to RDY %d", c, count)
-					}
 					q.updateRDY(c, count)
 				}
 				continue
@@ -599,14 +587,11 @@ func (q *Reader) rdyLoop() {
 				backoffTimer = time.NewTimer(backoffDuration)
 				backoffTimerChan = backoffTimer.C
 
-				log.Printf("backing off for %.04f seconds (backoff level %d)",
+				q.log(LogLevelWarning, "backing off for %.04f seconds (backoff level %d), setting all to RDY 0",
 					backoffDuration.Seconds(), backoffCounter)
 
 				// send RDY 0 immediately (to *all* connections)
 				for _, c := range q.conns() {
-					if q.config.verbose {
-						log.Printf("[%s] in backoff. sending RDY 0", c)
-					}
 					q.updateRDY(c, 0)
 				}
 			}
@@ -622,7 +607,7 @@ exit:
 	if backoffTimer != nil {
 		backoffTimer.Stop()
 	}
-	log.Printf("rdyLoop exiting")
+	q.log(LogLevelInfo, "rdyLoop exiting")
 	q.wg.Done()
 }
 
@@ -679,7 +664,7 @@ func (q *Reader) sendRDY(c *Conn, count int64) error {
 	c.SetRDY(count)
 	err := c.WriteCommand(Ready(int(count)))
 	if err != nil {
-		log.Printf("[%s] error sending RDY %d - %s", c, count, err)
+		q.log(LogLevelError, "(%s) error sending RDY %d - %s", c.String(), count, err)
 		return err
 	}
 	return nil
@@ -693,13 +678,13 @@ func (q *Reader) redistributeRDY() {
 	numConns := len(q.conns())
 	maxInFlight := q.maxInFlight()
 	if numConns > maxInFlight {
-		log.Printf("redistributing RDY state (%d conns > %d max_in_flight)",
+		q.log(LogLevelDebug, "redistributing RDY state (%d conns > %d max_in_flight)",
 			numConns, maxInFlight)
 		atomic.StoreInt32(&q.needRDYRedistributed, 1)
 	}
 
 	if q.inBackoff() && numConns > 1 {
-		log.Printf("redistributing RDY state (in backoff and %d conns > 1)", numConns)
+		q.log(LogLevelDebug, "redistributing RDY state (in backoff and %d conns > 1)", numConns)
 		atomic.StoreInt32(&q.needRDYRedistributed, 1)
 	}
 
@@ -712,12 +697,10 @@ func (q *Reader) redistributeRDY() {
 	for _, c := range conns {
 		lastMsgDuration := time.Now().Sub(c.LastMessageTime())
 		rdyCount := c.RDY()
-		if q.config.verbose {
-			log.Printf("[%s] rdy: %d (last message received %s)",
-				c, rdyCount, lastMsgDuration)
-		}
+		q.log(LogLevelDebug, "(%s) rdy: %d (last message received %s)",
+			c.String(), rdyCount, lastMsgDuration)
 		if rdyCount > 0 && lastMsgDuration > q.config.lowRdyIdleTimeout {
-			log.Printf("[%s] idle connection, giving up RDY count", c)
+			q.log(LogLevelDebug, "(%s) idle connection, giving up RDY", c.String())
 			q.updateRDY(c, 0)
 		}
 		possibleConns = append(possibleConns, c)
@@ -734,7 +717,7 @@ func (q *Reader) redistributeRDY() {
 		c := possibleConns[i]
 		// delete
 		possibleConns = append(possibleConns[:i], possibleConns[i+1:]...)
-		log.Printf("[%s] redistributing RDY", c)
+		q.log(LogLevelDebug, "(%s) redistributing RDY", c.String())
 		q.updateRDY(c, 1)
 	}
 }
@@ -747,7 +730,7 @@ func (q *Reader) Stop() {
 		return
 	}
 
-	log.Printf("stopping reader")
+	q.log(LogLevelInfo, "stopping...")
 
 	if len(q.conns()) == 0 {
 		q.stopHandlers()
@@ -755,7 +738,7 @@ func (q *Reader) Stop() {
 		for _, c := range q.conns() {
 			err := c.WriteCommand(StartClose())
 			if err != nil {
-				log.Printf("[%s] failed to start close - %s", c, err.Error())
+				q.log(LogLevelError, "(%s) error sending CLS - %s", c.String(), err)
 			}
 		}
 
@@ -767,7 +750,7 @@ func (q *Reader) Stop() {
 
 func (q *Reader) stopHandlers() {
 	q.stopHandler.Do(func() {
-		log.Printf("stopping handlers")
+		q.log(LogLevelInfo, "stopping handlers")
 		close(q.incomingMessages)
 	})
 }
@@ -784,7 +767,8 @@ func (q *Reader) AddHandler(handler Handler) {
 }
 
 func (q *Reader) handlerLoop(handler Handler) {
-	log.Println("Handler starting")
+	q.log(LogLevelInfo, "starting Handler")
+
 	for {
 		message, ok := <-q.incomingMessages
 		if !ok {
@@ -798,8 +782,7 @@ func (q *Reader) handlerLoop(handler Handler) {
 
 		err := handler.HandleMessage(message)
 		if err != nil {
-			log.Printf("ERROR: handler returned %s for msg %s %s",
-				err.Error(), message.Id, message.Body)
+			q.log(LogLevelError, "Handler returned error (%s) for msg %s", err, message.Id)
 			if !message.IsAutoResponseDisabled() {
 				message.Requeue(-1)
 			}
@@ -812,7 +795,7 @@ func (q *Reader) handlerLoop(handler Handler) {
 	}
 
 exit:
-	log.Printf("[%s] stopping Handler", q)
+	q.log(LogLevelInfo, "stopping Handler")
 	if atomic.AddInt32(&q.runningHandlers, -1) == 0 {
 		q.exit()
 	}
@@ -821,8 +804,8 @@ exit:
 func (q *Reader) shouldFailMessage(message *Message, handler interface{}) bool {
 	// message passed the max number of attempts
 	if q.config.maxAttempts > 0 && message.Attempts > q.config.maxAttempts {
-		log.Printf("WARNING: msg attempted %d times. giving up %s %s",
-			message.Attempts, message.Id, message.Body)
+		q.log(LogLevelWarning, "msg %s attempted %d times, giving up",
+			message.Id, message.Attempts)
 
 		logger, ok := handler.(FailedMessageLogger)
 		if ok {
@@ -838,4 +821,31 @@ func (q *Reader) exit() {
 	close(q.exitChan)
 	q.wg.Wait()
 	close(q.StopChan)
+}
+
+func (q *Reader) log(lvl LogLevel, line string, args ...interface{}) {
+	var prefix string
+
+	if q.logger == nil {
+		return
+	}
+
+	if q.logLvl > lvl {
+		return
+	}
+
+	switch lvl {
+	case LogLevelDebug:
+		prefix = "DBG"
+	case LogLevelInfo:
+		prefix = "INF"
+	case LogLevelWarning:
+		prefix = "WRN"
+	case LogLevelError:
+		prefix = "ERR"
+	}
+
+	q.logger.Printf("%-4s %3d [%s/%s] %s",
+		prefix, q.id, q.topic, q.channel,
+		fmt.Sprintf(line, args...))
 }

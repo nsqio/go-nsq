@@ -185,6 +185,8 @@ func TestReaderBackoff(t *testing.T) {
 	log.SetOutput(ioutil.Discard)
 	defer log.SetOutput(os.Stdout)
 
+	logger := log.New(ioutil.Discard, "", log.LstdFlags)
+
 	msgIdGood := MessageID{'1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'a', 's', 'd', 'f', 'g', 'h'}
 	msgGood := NewMessage(msgIdGood, []byte("good"))
 	msgBytesGood, _ := msgGood.EncodeBytes()
@@ -216,6 +218,7 @@ func TestReaderBackoff(t *testing.T) {
 	config.Set("max_in_flight", 5)
 	config.Set("backoff_multiplier", 10*time.Millisecond)
 	q, _ := NewReader(topicName, "ch", config)
+	q.SetLogger(logger, LogLevelDebug)
 	q.AddHandler(&testHandler{})
 	err := q.ConnectToNSQ(n.tcpAddr.String())
 	if err != nil {

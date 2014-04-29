@@ -2,6 +2,18 @@ package nsq
 
 import "time"
 
+// LogLevel specifies the severity of a given log message
+type LogLevel int
+
+const (
+	LogLevelDebug LogLevel = iota
+	LogLevelInfo
+	LogLevelWarning
+	LogLevelError
+)
+
+// MessageDelegate is an interface of methods that are used as
+// callbacks in Message
 type MessageDelegate interface {
 	// OnFinish is called when the Finish() method
 	// is triggered on the Message

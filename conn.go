@@ -56,6 +56,10 @@ type Conn struct {
 
 	Delegate ConnDelegate
 
+	logger *log.Logger
+	logLvl LogLevel
+	logFmt string
+
 	r io.Reader
 	w io.Writer
 
@@ -88,6 +92,21 @@ func NewConn(addr string, config *Config) *Conn {
 		msgResponseChan: make(chan *msgResponse),
 		exitChan:        make(chan int),
 		drainReady:      make(chan int),
+	}
+}
+
+// SetLogger assigns the logger to use as well as a level.
+//
+// The format parameter is expected to be a printf compatible string with
+// a single %s argument.  This is useful if you want to provide additional
+// context to the log messages that the connection will print, the default
+// is '(%s)'.
+func (c *Conn) SetLogger(logger *log.Logger, lvl LogLevel, format string) {
+	c.logger = logger
+	c.logLvl = lvl
+	c.logFmt = format
+	if c.logFmt == "" {
+		c.logFmt = "(%s)"
 	}
 }
 
@@ -198,6 +217,7 @@ func (c *Conn) WriteCommand(cmd *Command) error {
 exit:
 	c.mtx.Unlock()
 	if err != nil {
+		c.log(LogLevelError, "IO error - %s", err)
 		c.Delegate.OnIOError(c, err)
 	}
 	return err
@@ -273,9 +293,12 @@ func (c *Conn) identify() (*IdentifyResponse, error) {
 		return nil, ErrIdentify{err.Error()}
 	}
 
+	c.log(LogLevelDebug, "IDENTIFY response: %+v", resp)
+
 	c.maxRdyCount = resp.MaxRdyCount
 
 	if resp.TLSv1 {
+		c.log(LogLevelInfo, "upgrading to TLS")
 		err := c.upgradeTLS(c.config.tlsConfig)
 		if err != nil {
 			return nil, ErrIdentify{err.Error()}
@@ -283,6 +306,7 @@ func (c *Conn) identify() (*IdentifyResponse, error) {
 	}
 
 	if resp.Deflate {
+		c.log(LogLevelInfo, "upgrading to Deflate")
 		err := c.upgradeDeflate(c.config.deflateLevel)
 		if err != nil {
 			return nil, ErrIdentify{err.Error()}
@@ -290,6 +314,7 @@ func (c *Conn) identify() (*IdentifyResponse, error) {
 	}
 
 	if resp.Snappy {
+		c.log(LogLevelInfo, "upgrading to Snappy")
 		err := c.upgradeSnappy()
 		if err != nil {
 			return nil, ErrIdentify{err.Error()}
@@ -368,15 +393,18 @@ func (c *Conn) readLoop() {
 		frameType, data, err := c.ReadUnpackedResponse()
 		if err != nil {
 			if !strings.Contains(err.Error(), "use of closed network connection") {
+				c.log(LogLevelError, "IO error - %s", err)
 				c.Delegate.OnIOError(c, err)
 			}
 			goto exit
 		}
 
 		if frameType == FrameTypeResponse && bytes.Equal(data, []byte("_heartbeat_")) {
+			c.log(LogLevelDebug, "heartbeat received")
 			c.Delegate.OnHeartbeat(c)
 			err := c.WriteCommand(Nop())
 			if err != nil {
+				c.log(LogLevelError, "IO error - %s", err)
 				c.Delegate.OnIOError(c, err)
 				goto exit
 			}
@@ -389,18 +417,22 @@ func (c *Conn) readLoop() {
 		case FrameTypeMessage:
 			msg, err := DecodeMessage(data)
 			if err != nil {
+				c.log(LogLevelError, "IO error - %s", err)
 				c.Delegate.OnIOError(c, err)
 				goto exit
 			}
 			msg.Delegate = &connMessageDelegate{c}
+
 			atomic.AddInt64(&c.rdyCount, -1)
 			atomic.AddInt64(&c.messagesInFlight, 1)
 			atomic.StoreInt64(&c.lastMsgTimestamp, time.Now().UnixNano())
 
 			c.Delegate.OnMessage(c, msg)
 		case FrameTypeError:
+			c.log(LogLevelError, "protocol error - %s", data)
 			c.Delegate.OnError(c, data)
 		default:
+			c.log(LogLevelError, "IO error - %s", err)
 			c.Delegate.OnIOError(c, fmt.Errorf("unknown frame type %d", frameType))
 		}
 	}
@@ -415,25 +447,24 @@ exit:
 		// writeLoop won't
 		c.close()
 	} else {
-		log.Printf("[%s] delaying close, %d outstanding messages",
-			c, messagesInFlight)
+		c.log(LogLevelWarning, "delaying close, %d outstanding messages", messagesInFlight)
 	}
 	c.wg.Done()
-	log.Printf("[%s] readLoop exiting", c)
+	c.log(LogLevelInfo, "readLoop exiting")
 }
 
 func (c *Conn) writeLoop() {
 	for {
 		select {
 		case <-c.exitChan:
-			log.Printf("[%s] breaking out of writeLoop", c)
+			c.log(LogLevelInfo, "breaking out of writeLoop")
 			// Indicate drainReady because we will not pull any more off msgResponseChan
 			close(c.drainReady)
 			goto exit
 		case cmd := <-c.cmdChan:
 			err := c.WriteCommand(cmd)
 			if err != nil {
-				log.Printf("[%s] error sending command %s - %s", c, cmd, err)
+				c.log(LogLevelError, "error sending command %s - %s", cmd, err)
 				c.close()
 				continue
 			}
@@ -443,14 +474,16 @@ func (c *Conn) writeLoop() {
 
 			err := c.WriteCommand(resp.cmd)
 			if err != nil {
-				log.Printf("[%s] error sending command %s - %s", c, resp.cmd, err)
+				c.log(LogLevelError, "error sending command %s - %s", resp.cmd, err)
 				c.close()
 				continue
 			}
 
 			if resp.success {
+				c.log(LogLevelDebug, "FIN %s", resp.msg.ID)
 				c.Delegate.OnMessageFinished(c, resp.msg)
 			} else {
+				c.log(LogLevelDebug, "REQ %s", resp.msg.ID)
 				c.Delegate.OnMessageRequeued(c, resp.msg)
 			}
 
@@ -464,7 +497,7 @@ func (c *Conn) writeLoop() {
 
 exit:
 	c.wg.Done()
-	log.Printf("[%s] writeLoop exiting", c)
+	c.log(LogLevelInfo, "writeLoop exiting")
 }
 
 func (c *Conn) close() {
@@ -494,7 +527,7 @@ func (c *Conn) close() {
 	//         d. trigger Delegate OnClose()
 	//
 	c.stopper.Do(func() {
-		log.Printf("[%s] beginning close", c)
+		c.log(LogLevelInfo, "beginning close")
 		close(c.exitChan)
 		c.conn.CloseRead()
 
@@ -521,13 +554,13 @@ func (c *Conn) cleanup() {
 			msgsInFlight = atomic.LoadInt64(&c.messagesInFlight)
 		}
 		if msgsInFlight > 0 {
-			log.Printf("[%s] draining... waiting for %d messages in flight", c, msgsInFlight)
+			c.log(LogLevelWarning, "draining... waiting for %d messages in flight", msgsInFlight)
 			continue
 		}
 		// until the readLoop has exited we cannot be sure that there
 		// still won't be a race
 		if atomic.LoadInt32(&c.readLoopRunning) == 1 {
-			log.Printf("[%s] draining... readLoop still running", c)
+			c.log(LogLevelWarning, "draining... readLoop still running")
 			continue
 		}
 		goto exit
@@ -536,7 +569,7 @@ func (c *Conn) cleanup() {
 exit:
 	ticker.Stop()
 	c.wg.Done()
-	log.Printf("[%s] finished draining, cleanup exiting", c)
+	c.log(LogLevelInfo, "finished draining, cleanup exiting")
 }
 
 func (c *Conn) waitForCleanup() {
@@ -544,7 +577,7 @@ func (c *Conn) waitForCleanup() {
 	// (and cleanup goroutine above) have exited
 	c.wg.Wait()
 	c.conn.CloseWrite()
-	log.Printf("[%s] clean close complete", c)
+	c.log(LogLevelInfo, "clean close complete")
 	c.Delegate.OnClose(c)
 }
 
@@ -569,4 +602,31 @@ func (c *Conn) onMessageTouch(m *Message) {
 	case c.cmdChan <- Touch(m.Id):
 	case <-c.exitChan:
 	}
+}
+
+func (c *Conn) log(lvl LogLevel, line string, args ...interface{}) {
+	var prefix string
+
+	if c.logger == nil {
+		return
+	}
+
+	if c.logLvl > lvl {
+		return
+	}
+
+	switch lvl {
+	case LogLevelDebug:
+		prefix = "DBG"
+	case LogLevelInfo:
+		prefix = "INF"
+	case LogLevelWarning:
+		prefix = "WRN"
+	case LogLevelError:
+		prefix = "ERR"
+	}
+
+	c.logger.Printf("%-4s %s %s", prefix,
+		fmt.Sprintf(c.logFmt, c.String()),
+		fmt.Sprintf(line, args...))
 }

@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -61,48 +60,32 @@ func SendMessage(t *testing.T, port int, topic string, method string, body []byt
 }
 
 func TestReader(t *testing.T) {
-	log.SetOutput(ioutil.Discard)
-	defer log.SetOutput(os.Stdout)
-
 	readerTest(t, false, false, false)
 }
 
 func TestReaderTLS(t *testing.T) {
-	log.SetOutput(ioutil.Discard)
-	defer log.SetOutput(os.Stdout)
-
 	readerTest(t, false, false, true)
 }
 
 func TestReaderDeflate(t *testing.T) {
-	log.SetOutput(ioutil.Discard)
-	defer log.SetOutput(os.Stdout)
-
 	readerTest(t, true, false, false)
 }
 
 func TestReaderSnappy(t *testing.T) {
-	log.SetOutput(ioutil.Discard)
-	defer log.SetOutput(os.Stdout)
-
 	readerTest(t, false, true, false)
 }
 
 func TestReaderTLSDeflate(t *testing.T) {
-	log.SetOutput(ioutil.Discard)
-	defer log.SetOutput(os.Stdout)
-
 	readerTest(t, true, false, true)
 }
 
 func TestReaderTLSSnappy(t *testing.T) {
-	log.SetOutput(ioutil.Discard)
-	defer log.SetOutput(os.Stdout)
-
 	readerTest(t, false, true, true)
 }
 
 func readerTest(t *testing.T, deflate bool, snappy bool, tlsv1 bool) {
+	logger := log.New(ioutil.Discard, "", log.LstdFlags)
+
 	topicName := "rdr_test"
 	if deflate {
 		topicName = topicName + "_deflate"
@@ -130,6 +113,7 @@ func readerTest(t *testing.T, deflate bool, snappy bool, tlsv1 bool) {
 		})
 	}
 	q, _ := NewReader(topicName, "ch", config)
+	q.SetLogger(logger, LogLevelInfo)
 
 	h := &MyTestHandler{
 		t: t,

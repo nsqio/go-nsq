@@ -1,6 +1,7 @@
 package nsq
 
 import (
+	"fmt"
 	"log"
 	"sync"
 	"sync/atomic"
@@ -13,9 +14,13 @@ import (
 // and will lazily connect to that instance (and re-connect)
 // when Publish commands are executed.
 type Writer struct {
+	id     int64
 	addr   string
 	conn   *Conn
 	config *Config
+
+	logger *log.Logger
+	logLvl LogLevel
 
 	responseChan  chan []byte
 	errorChan     chan []byte
@@ -52,6 +57,8 @@ func (t *WriterTransaction) finish() {
 // NewWriter returns an instance of Writer for the specified address
 func NewWriter(addr string, config *Config) *Writer {
 	return &Writer{
+		id: atomic.AddInt64(&instCount, 1),
+
 		addr:   addr,
 		config: config,
 
@@ -63,6 +70,12 @@ func NewWriter(addr string, config *Config) *Writer {
 		heartbeatChan:   make(chan int),
 		closeChan:       make(chan int),
 	}
+}
+
+// SetLogger assigns the logger to use as well as a level
+func (w *Writer) SetLogger(logger *log.Logger, lvl LogLevel) {
+	w.logger = logger
+	w.logLvl = lvl
 }
 
 // String returns the address of the Writer
@@ -175,32 +188,19 @@ func (w *Writer) connect() error {
 		return ErrNotConnected
 	}
 
-	log.Printf("[%s] connecting...", w)
+	w.log(LogLevelInfo, "(%s) connecting to nsqd", w.addr)
 
 	conn := NewConn(w.addr, w.config)
+	conn.SetLogger(w.logger, w.logLvl, fmt.Sprintf("%3d (%%s)", w.id))
 	conn.Delegate = &writerConnDelegate{w}
 
-	resp, err := conn.Connect()
+	_, err := conn.Connect()
 	if err != nil {
 		conn.Close()
-		log.Printf("ERROR: [%s] failed to IDENTIFY - %s", w, err)
+		w.log(LogLevelError, "(%s) error connecting to nsqd - %s", w.addr, err)
 		atomic.StoreInt32(&w.state, StateInit)
 		return err
 	}
-
-	if resp != nil {
-		log.Printf("[%s] IDENTIFY response: %+v", w, resp)
-		if resp.TLSv1 {
-			log.Printf("[%s] upgrading to TLS", w)
-		}
-		if resp.Deflate {
-			log.Printf("[%s] upgrading to Deflate", w)
-		}
-		if resp.Snappy {
-			log.Printf("[%s] upgrading to Snappy", w)
-		}
-	}
-
 	w.conn = conn
 
 	w.wg.Add(1)
@@ -229,7 +229,7 @@ func (w *Writer) router() {
 			w.transactions = append(w.transactions, t)
 			err := w.conn.WriteCommand(t.cmd)
 			if err != nil {
-				log.Printf("ERROR: [%s] failed writing %s", w, err)
+				w.log(LogLevelError, "(%s) sending command - %s", w.conn.String(), err)
 				w.close()
 			}
 		case data := <-w.responseChan:
@@ -237,9 +237,7 @@ func (w *Writer) router() {
 		case data := <-w.errorChan:
 			w.popTransaction(FrameTypeError, data)
 		case <-w.heartbeatChan:
-			log.Printf("[%s] heartbeat received", w)
-		case err := <-w.ioErrorChan:
-			log.Printf("ERROR: [%s] %s", w, err)
+		case <-w.ioErrorChan:
 			w.close()
 		case <-w.closeChan:
 			goto exit
@@ -251,7 +249,7 @@ func (w *Writer) router() {
 exit:
 	w.transactionCleanup()
 	w.wg.Done()
-	log.Printf("[%s] exiting messageRouter()", w)
+	w.log(LogLevelInfo, "exiting router")
 }
 
 func (w *Writer) popTransaction(frameType int32, data []byte) {
@@ -289,6 +287,31 @@ func (w *Writer) transactionCleanup() {
 			continue
 		}
 	}
+}
+
+func (w *Writer) log(lvl LogLevel, line string, args ...interface{}) {
+	var prefix string
+
+	if w.logger == nil {
+		return
+	}
+
+	if w.logLvl > lvl {
+		return
+	}
+
+	switch lvl {
+	case LogLevelDebug:
+		prefix = "DBG"
+	case LogLevelInfo:
+		prefix = "INF"
+	case LogLevelWarning:
+		prefix = "WRN"
+	case LogLevelError:
+		prefix = "ERR"
+	}
+
+	w.logger.Printf("%-4s %3d %s", prefix, w.id, fmt.Sprintf(line, args...))
 }
 
 func (w *Writer) onConnResponse(c *Conn, data []byte) { w.responseChan <- data }
