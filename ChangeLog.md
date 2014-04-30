@@ -1,5 +1,26 @@
 ## go-nsq Change Log
 
+### 0.3.6 - 2014-04-29
+
+**Upgrading from 0.3.5**: There are no backward incompatible changes.
+
+This release includes a significant internal refactoring, designed
+to better encapsulate responsibility, see #19.
+
+Specifically:
+
+ * make `Conn` public
+ * move transport responsibilities into `Conn` from `Reader`/`Writer`
+ * supply callbacks for hooking into `Conn` events
+
+As part of the refactoring, a few additional clean exit related 
+issues were resolved:
+
+ * wait group now includes all exit related goroutines
+ * ensure that readLoop exits before exiting cleanup
+ * always check messagesInFlight at readLoop exit
+ * close underlying connection last
+
 ### 0.3.5 - 2014-04-05
 
 **Upgrading from 0.3.4**: There are no backward incompatible changes.
