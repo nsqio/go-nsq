@@ -653,9 +653,16 @@ func (q *Reader) rdyLoop() {
 		case <-backoffTimerChan:
 			var choice *Conn
 
+			backoffTimer = nil
+			backoffTimerChan = nil
+			atomic.StoreInt64(&q.backoffDuration, 0)
+
 			q.RLock()
 			// pick a random connection to test the waters
 			var i int
+			if len(q.connections) == 0 {
+				continue
+			}
 			idx := rand.Intn(len(q.connections))
 			for _, c := range q.connections {
 				if i == idx {
@@ -666,15 +673,9 @@ func (q *Reader) rdyLoop() {
 			}
 			q.RUnlock()
 
-			if choice != nil {
-				log.Printf("[%s] backoff time expired, continuing with RDY 1...", choice)
-				// while in backoff only ever let 1 message at a time through
-				q.updateRDY(choice, 1)
-			}
-
-			backoffTimer = nil
-			backoffTimerChan = nil
-			atomic.StoreInt64(&q.backoffDuration, 0)
+			log.Printf("[%s] backoff time expired, continuing with RDY 1...", choice)
+			// while in backoff only ever let 1 message at a time through
+			q.updateRDY(choice, 1)
 		case c := <-q.rdyChan:
 			if backoffTimer != nil || backoffCounter > 0 {
 				continue
