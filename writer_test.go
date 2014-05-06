@@ -246,7 +246,7 @@ func readMessages(topicName string, t *testing.T, msgCount int) {
 		t: t,
 		q: q,
 	}
-	q.AddHandler(h)
+	q.SetHandler(h)
 
 	err := q.ConnectToNSQD("127.0.0.1:4150")
 	if err != nil {

@@ -30,7 +30,7 @@ type Handler interface {
 // HandlerFunc is a convenience type to avoid having to declare a struct
 // to implement the Handler interface, it can be used like this:
 //
-// 	reader.AddHandler(nsq.HandlerFunc(func(m *Message) error {
+// 	reader.SetHandler(nsq.HandlerFunc(func(m *Message) error {
 // 		// handle the message
 // 	})
 type HandlerFunc func(message *Message) error
@@ -773,15 +773,30 @@ func (q *Reader) stopHandlers() {
 	})
 }
 
-// AddHandler adds a Handler for messages received by this Reader.
+// SetHandler sets the Handler for messages received by this Reader.
 //
-// See Handler for details on implementing this interface.
+// (see Handler or HandlerFunc for details on implementing this interface)
+func (q *Reader) SetHandler(handler Handler) {
+	q.setHandlers(handler, 1)
+}
+
+// SetConcurrentHandlers sets the Handler for messages received by this Reader.  It
+// takes a second argument which indicates the number of goroutines to spawn for
+// message handling.
 //
-// It's ok to start more than one handler simultaneously, they
-// are concurrently executed in goroutines.
-func (q *Reader) AddHandler(handler Handler) {
-	atomic.AddInt32(&q.runningHandlers, 1)
-	go q.handlerLoop(handler)
+// (see Handler or HandlerFunc for details on implementing this interface)
+func (q *Reader) SetConcurrentHandlers(handler Handler, concurrency int) {
+	q.setHandlers(handler, concurrency)
+}
+
+func (q *Reader) setHandlers(handler Handler, concurrency int) {
+	if atomic.LoadInt32(&q.runningHandlers) > 0 {
+		panic("cannot call setHandlers() multiple times")
+	}
+	atomic.AddInt32(&q.runningHandlers, int32(concurrency))
+	for i := 0; i < concurrency; i++ {
+		go q.handlerLoop(handler)
+	}
 }
 
 func (q *Reader) handlerLoop(handler Handler) {
