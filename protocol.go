@@ -8,16 +8,17 @@ import (
 	"time"
 )
 
+// MagicV1 is the initial identifier sent when connecting for V1 clients
 var MagicV1 = []byte("  V1")
+
+// MagicV2 is the initial identifier sent when connecting for V2 clients
 var MagicV2 = []byte("  V2")
 
+// frame types
 const (
-	// when successful
 	FrameTypeResponse int32 = 0
-	// when an error occurred
-	FrameTypeError int32 = 1
-	// when it's a serialized message
-	FrameTypeMessage int32 = 2
+	FrameTypeError    int32 = 1
+	FrameTypeMessage  int32 = 2
 )
 
 // The amount of time nsqd will allow a client to idle, can be overriden

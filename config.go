@@ -14,6 +14,9 @@ import (
 	"unsafe"
 )
 
+// Config is a struct of NSQ options
+//
+// (see Config.Set() for available parameters)
 type Config struct {
 	sync.RWMutex
 
@@ -55,6 +58,7 @@ type Config struct {
 	maxBackoffDuration time.Duration `opt:"max_backoff_duration" min:"0" max:"60m"`
 }
 
+// NewConfig returns a new default configuration
 func NewConfig() *Config {
 	hostname, err := os.Hostname()
 	if err != nil {

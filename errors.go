@@ -5,35 +5,41 @@ import (
 	"fmt"
 )
 
-// returned when a publish command is made against a Writer that is not connected
+// ErrNotConnected is returned when a publish command is made
+// against a Writer that is not connected
 var ErrNotConnected = errors.New("not connected")
 
-// returned when a publish command is made against a Writer that has been stopped
+// ErrStopped is returned when a publish command is
+// made against a Writer that has been stopped
 var ErrStopped = errors.New("stopped")
 
-// returned from ConnectToNSQD when already connected
+// ErrAlreadyConnected is returned from ConnectToNSQD when already connected
 var ErrAlreadyConnected = errors.New("already connected")
 
-// returned from Reader if over max-in-flight
+// ErrOverMaxInFlight is returned from Reader if over max-in-flight
 var ErrOverMaxInFlight = errors.New("over configure max-inflight")
 
-// returned from ConnectToNSQLookupd when given lookupd address exists already
+// ErrLookupdAddressExists is returned from ConnectToNSQLookupd
+// when given lookupd address exists already
 var ErrLookupdAddressExists = errors.New("lookupd address already exists")
 
-// returned from Conn as part of the IDENTIFY handshake
+// ErrIdentify is returned from Conn as part of the IDENTIFY handshake
 type ErrIdentify struct {
 	Reason string
 }
 
+// Error returns a stringified error
 func (e ErrIdentify) Error() string {
 	return fmt.Sprintf("failed to IDENTIFY - %s", e.Reason)
 }
 
-// reuturned from Writer when encountering an NSQ protocol level error
+// ErrProtocol is returned from Writer when encountering
+// an NSQ protocol level error
 type ErrProtocol struct {
 	Reason string
 }
 
+// Error returns a stringified error
 func (e ErrProtocol) Error() string {
 	return e.Reason
 }

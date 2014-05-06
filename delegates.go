@@ -5,6 +5,7 @@ import "time"
 // LogLevel specifies the severity of a given log message
 type LogLevel int
 
+// logging levels
 const (
 	LogLevelDebug LogLevel = iota
 	LogLevelInfo
@@ -38,6 +39,8 @@ func (d *connMessageDelegate) OnRequeue(m *Message, t time.Duration, b bool) {
 }
 func (d *connMessageDelegate) OnTouch(m *Message) { d.c.onMessageTouch(m) }
 
+// ConnDelegate is an interface of methods that are used as
+// callbacks in Conn
 type ConnDelegate interface {
 	// OnResponse is called when the connection
 	// receives a FrameTypeResponse from nsqd

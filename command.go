@@ -28,9 +28,11 @@ func (c *Command) String() string {
 	return string(c.Name)
 }
 
-// Write serializes the Command to the supplied Writer.
+// WriteTo implements the WriterTo interface and
+// serializes the Command to the supplied Writer.
 //
-// It is suggested that the target Writer is buffered to avoid performing many system calls.
+// It is suggested that the target Writer is buffered
+// to avoid performing many system calls.
 func (c *Command) WriteTo(w io.Writer) (int64, error) {
 	var total int64
 	var buf [4]byte
@@ -103,7 +105,7 @@ func Register(topic string, channel string) *Command {
 	return &Command{[]byte("REGISTER"), params, nil}
 }
 
-// Unregister creates a new Command to remove a topic/channel for the connected nsqd
+// UnRegister creates a new Command to remove a topic/channel for the connected nsqd
 func UnRegister(topic string, channel string) *Command {
 	params := [][]byte{[]byte(topic)}
 	if len(channel) > 0 {

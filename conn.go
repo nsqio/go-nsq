@@ -184,7 +184,7 @@ func (c *Conn) LastMessageTime() time.Time {
 	return time.Unix(0, atomic.LoadInt64(&c.lastMsgTimestamp))
 }
 
-// Address returns the configured destination nsqd address
+// RemoteAddr returns the configured destination nsqd address
 func (c *Conn) RemoteAddr() net.Addr {
 	return c.conn.RemoteAddr()
 }
@@ -206,6 +206,8 @@ func (c *Conn) Write(p []byte) (int, error) {
 	return c.w.Write(p)
 }
 
+// WriteCommand is a goroutine safe method to write a Command
+// to this connection, and flush.
 func (c *Conn) WriteCommand(cmd *Command) error {
 	c.mtx.Lock()
 

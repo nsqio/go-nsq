@@ -35,6 +35,7 @@ type Handler interface {
 // 	})
 type HandlerFunc func(message *Message) error
 
+// HandleMessage implements the Handler interface
 func (h HandlerFunc) HandleMessage(m *Message) error {
 	return h(m)
 }
@@ -284,7 +285,7 @@ func (q *Reader) queryLookupd() {
 	//     "status_code": 200,
 	//     "status_txt": "OK"
 	// }
-	for i, _ := range data.Get("producers").MustArray() {
+	for i := range data.Get("producers").MustArray() {
 		producer := data.Get("producers").GetIndex(i)
 		address := producer.Get("address").MustString()
 		broadcastAddress, ok := producer.CheckGet("broadcast_address")
