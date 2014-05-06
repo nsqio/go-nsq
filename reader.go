@@ -374,12 +374,18 @@ func (q *Reader) onConnMessage(c *Conn, msg *Message) {
 
 func (q *Reader) onConnMessageFinished(c *Conn, msg *Message) {
 	atomic.AddUint64(&q.messagesFinished, 1)
-	q.backoffChan <- true
 }
 
 func (q *Reader) onConnMessageRequeued(c *Conn, msg *Message) {
 	atomic.AddUint64(&q.messagesRequeued, 1)
+}
+
+func (q *Reader) onConnBackoff(c *Conn) {
 	q.backoffChan <- false
+}
+
+func (q *Reader) onConnResume(c *Conn) {
+	q.backoffChan <- true
 }
 
 func (q *Reader) onConnResponse(c *Conn, data []byte) {

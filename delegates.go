@@ -21,7 +21,7 @@ type MessageDelegate interface {
 
 	// OnRequeue is called when the Requeue() method
 	// is triggered on the Message
-	OnRequeue(*Message, time.Duration)
+	OnRequeue(m *Message, delay time.Duration, backoff bool)
 
 	// OnTouch is called when the Touch() method
 	// is triggered on the Message
@@ -32,9 +32,11 @@ type connMessageDelegate struct {
 	c *Conn
 }
 
-func (d *connMessageDelegate) OnFinish(m *Message)                   { d.c.onMessageFinish(m) }
-func (d *connMessageDelegate) OnRequeue(m *Message, t time.Duration) { d.c.onMessageRequeue(m, t) }
-func (d *connMessageDelegate) OnTouch(m *Message)                    { d.c.onMessageTouch(m) }
+func (d *connMessageDelegate) OnFinish(m *Message) { d.c.onMessageFinish(m) }
+func (d *connMessageDelegate) OnRequeue(m *Message, t time.Duration, b bool) {
+	d.c.onMessageRequeue(m, t, b)
+}
+func (d *connMessageDelegate) OnTouch(m *Message) { d.c.onMessageTouch(m) }
 
 type ConnDelegate interface {
 	// OnResponse is called when the connection
@@ -56,6 +58,12 @@ type ConnDelegate interface {
 	// OnMessageRequeued is called when the connection
 	// handles a REQ command from a message handler
 	OnMessageRequeued(*Conn, *Message)
+
+	// OnBackoff is called when the connection triggers a backoff state
+	OnBackoff(*Conn)
+
+	// OnResume is called when the connection triggers a resume state
+	OnResume(*Conn)
 
 	// OnIOError is called when the connection experiences
 	// a low-level TCP transport error
@@ -81,6 +89,8 @@ func (d *readerConnDelegate) OnError(c *Conn, data []byte)          { d.r.onConn
 func (d *readerConnDelegate) OnMessage(c *Conn, m *Message)         { d.r.onConnMessage(c, m) }
 func (d *readerConnDelegate) OnMessageFinished(c *Conn, m *Message) { d.r.onConnMessageFinished(c, m) }
 func (d *readerConnDelegate) OnMessageRequeued(c *Conn, m *Message) { d.r.onConnMessageRequeued(c, m) }
+func (d *readerConnDelegate) OnBackoff(c *Conn)                     { d.r.onConnBackoff(c) }
+func (d *readerConnDelegate) OnResume(c *Conn)                      { d.r.onConnResume(c) }
 func (d *readerConnDelegate) OnIOError(c *Conn, err error)          { d.r.onConnIOError(c, err) }
 func (d *readerConnDelegate) OnHeartbeat(c *Conn)                   { d.r.onConnHeartbeat(c) }
 func (d *readerConnDelegate) OnClose(c *Conn)                       { d.r.onConnClose(c) }
@@ -96,6 +106,8 @@ func (d *writerConnDelegate) OnError(c *Conn, data []byte)          { d.w.onConn
 func (d *writerConnDelegate) OnMessage(c *Conn, m *Message)         {}
 func (d *writerConnDelegate) OnMessageFinished(c *Conn, m *Message) {}
 func (d *writerConnDelegate) OnMessageRequeued(c *Conn, m *Message) {}
+func (d *writerConnDelegate) OnBackoff(c *Conn)                     {}
+func (d *writerConnDelegate) OnResume(c *Conn)                      {}
 func (d *writerConnDelegate) OnIOError(c *Conn, err error)          { d.w.onConnIOError(c, err) }
 func (d *writerConnDelegate) OnHeartbeat(c *Conn)                   { d.w.onConnHeartbeat(c) }
 func (d *writerConnDelegate) OnClose(c *Conn)                       { d.w.onConnClose(c) }

@@ -88,11 +88,20 @@ func (m *Message) Requeue(delay time.Duration) {
 	m.doRequeue(delay, true)
 }
 
+// RequeueWithoutBackoff sends a REQ command to the nsqd which
+// sent this message, using the supplied delay.
+//
+// Notably, using this method to respond does not trigger a backoff
+// event on the configured Delegate.
+func (m *Message) RequeueWithoutBackoff(delay time.Duration) {
+	m.doRequeue(delay, false)
+}
+
 func (m *Message) doRequeue(delay time.Duration, backoff bool) {
 	if m.HasResponded() {
 		return
 	}
-	m.Delegate.OnRequeue(m, delay)
+	m.Delegate.OnRequeue(m, delay, backoff)
 	atomic.StoreInt32(&m.responded, 1)
 }
 

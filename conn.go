@@ -32,6 +32,7 @@ type msgResponse struct {
 	msg     *Message
 	cmd     *Command
 	success bool
+	backoff bool
 }
 
 // Conn represents a connection to nsqd
@@ -482,9 +483,15 @@ func (c *Conn) writeLoop() {
 			if resp.success {
 				c.log(LogLevelDebug, "FIN %s", resp.msg.ID)
 				c.Delegate.OnMessageFinished(c, resp.msg)
+				if resp.backoff {
+					c.Delegate.OnResume(c)
+				}
 			} else {
 				c.log(LogLevelDebug, "REQ %s", resp.msg.ID)
 				c.Delegate.OnMessageRequeued(c, resp.msg)
+				if resp.backoff {
+					c.Delegate.OnBackoff(c)
+				}
 			}
 
 			if msgsInFlight == 0 &&
@@ -582,10 +589,10 @@ func (c *Conn) waitForCleanup() {
 }
 
 func (c *Conn) onMessageFinish(m *Message) {
-	c.msgResponseChan <- &msgResponse{m, Finish(m.Id), true}
+	c.msgResponseChan <- &msgResponse{m, Finish(m.Id), true, true}
 }
 
-func (c *Conn) onMessageRequeue(m *Message, delay time.Duration) {
+func (c *Conn) onMessageRequeue(m *Message, delay time.Duration, backoff bool) {
 	if delay == -1 {
 		// linear delay
 		delay = c.config.defaultRequeueDelay * time.Duration(m.Attempts)
@@ -594,7 +601,7 @@ func (c *Conn) onMessageRequeue(m *Message, delay time.Duration) {
 			delay = c.config.maxRequeueDelay
 		}
 	}
-	c.msgResponseChan <- &msgResponse{m, Requeue(m.Id, delay), false}
+	c.msgResponseChan <- &msgResponse{m, Requeue(m.Id, delay), false, backoff}
 }
 
 func (c *Conn) onMessageTouch(m *Message) {
