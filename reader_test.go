@@ -127,12 +127,12 @@ func readerTest(t *testing.T, deflate bool, snappy bool, tlsv1 bool) {
 	h.messagesSent = 4
 
 	addr := "127.0.0.1:4150"
-	err := q.ConnectToNSQ(addr)
+	err := q.ConnectToNSQD(addr)
 	if err != nil {
 		t.Fatalf(err.Error())
 	}
 
-	err = q.ConnectToNSQ(addr)
+	err = q.ConnectToNSQD(addr)
 	if err == nil {
 		t.Fatalf("should not be able to connect to the same NSQ twice")
 	}

@@ -224,7 +224,7 @@ func TestReaderBackoff(t *testing.T) {
 	q, _ := NewReader(topicName, "ch", config)
 	q.SetLogger(logger, LogLevelDebug)
 	q.AddHandler(&testHandler{})
-	err := q.ConnectToNSQ(n.tcpAddr.String())
+	err := q.ConnectToNSQD(n.tcpAddr.String())
 	if err != nil {
 		t.Fatalf(err.Error())
 	}
