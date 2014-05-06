@@ -263,7 +263,7 @@ func (q *Reader) queryLookupd() {
 
 	q.log(LogLevelInfo, "querying nsqlookupd %s", endpoint)
 
-	data, err := ApiRequest(endpoint)
+	data, err := apiRequest(endpoint)
 	if err != nil {
 		q.log(LogLevelError, "error querying nsqlookupd (%s) - %s", addr, err)
 		return
