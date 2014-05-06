@@ -188,14 +188,14 @@ func TestReaderBackoff(t *testing.T) {
 	logger := log.New(ioutil.Discard, "", log.LstdFlags)
 
 	var mgood bytes.Buffer
-	msgIdGood := MessageID{'1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'a', 's', 'd', 'f', 'g', 'h'}
-	msgGood := NewMessage(msgIdGood, []byte("good"))
+	msgIDGood := MessageID{'1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'a', 's', 'd', 'f', 'g', 'h'}
+	msgGood := NewMessage(msgIDGood, []byte("good"))
 	msgGood.WriteTo(&mgood)
 	msgBytesGood := mgood.Bytes()
 
 	var mbad bytes.Buffer
-	msgIdBad := MessageID{'z', 'x', 'c', 'v', 'b', '6', '7', '8', '9', '0', 'a', 's', 'd', 'f', 'g', 'h'}
-	msgBad := NewMessage(msgIdBad, []byte("bad"))
+	msgIDBad := MessageID{'z', 'x', 'c', 'v', 'b', '6', '7', '8', '9', '0', 'a', 's', 'd', 'f', 'g', 'h'}
+	msgBad := NewMessage(msgIDBad, []byte("bad"))
 	msgBad.WriteTo(&mbad)
 	msgBytesBad := mbad.Bytes()
 
@@ -239,20 +239,20 @@ func TestReaderBackoff(t *testing.T) {
 		"IDENTIFY",
 		"SUB " + topicName + " ch",
 		"RDY 5",
-		fmt.Sprintf("FIN %s", msgIdGood),
-		fmt.Sprintf("FIN %s", msgIdGood),
-		fmt.Sprintf("FIN %s", msgIdGood),
+		fmt.Sprintf("FIN %s", msgIDGood),
+		fmt.Sprintf("FIN %s", msgIDGood),
+		fmt.Sprintf("FIN %s", msgIDGood),
 		"RDY 5",
-		fmt.Sprintf("REQ %s 0", msgIdBad),
+		fmt.Sprintf("REQ %s 0", msgIDBad),
 		"RDY 0",
 		"RDY 1",
-		fmt.Sprintf("REQ %s 0", msgIdBad),
+		fmt.Sprintf("REQ %s 0", msgIDBad),
 		"RDY 0",
 		"RDY 1",
-		fmt.Sprintf("FIN %s", msgIdGood),
+		fmt.Sprintf("FIN %s", msgIDGood),
 		"RDY 0",
 		"RDY 1",
-		fmt.Sprintf("FIN %s", msgIdGood),
+		fmt.Sprintf("FIN %s", msgIDGood),
 		"RDY 5",
 	}
 	if len(n.got) != len(expected) {

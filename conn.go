@@ -578,7 +578,7 @@ func (c *Conn) waitForCleanup() {
 }
 
 func (c *Conn) onMessageFinish(m *Message) {
-	c.msgResponseChan <- &msgResponse{m, Finish(m.Id), true, true}
+	c.msgResponseChan <- &msgResponse{m, Finish(m.ID), true, true}
 }
 
 func (c *Conn) onMessageRequeue(m *Message, delay time.Duration, backoff bool) {
@@ -590,12 +590,12 @@ func (c *Conn) onMessageRequeue(m *Message, delay time.Duration, backoff bool) {
 			delay = c.config.maxRequeueDelay
 		}
 	}
-	c.msgResponseChan <- &msgResponse{m, Requeue(m.Id, delay), false, backoff}
+	c.msgResponseChan <- &msgResponse{m, Requeue(m.ID, delay), false, backoff}
 }
 
 func (c *Conn) onMessageTouch(m *Message) {
 	select {
-	case c.cmdChan <- Touch(m.Id):
+	case c.cmdChan <- Touch(m.ID):
 	case <-c.exitChan:
 	}
 }

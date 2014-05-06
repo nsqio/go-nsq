@@ -9,15 +9,16 @@ import (
 	"time"
 )
 
-// The number of bytes for a Message.Id
-const MsgIdLength = 16
+// The number of bytes for a Message.ID
+const MsgIDLength = 16
 
-type MessageID [MsgIdLength]byte
+// MessageID is the ASCII encoded hexadecimal message ID
+type MessageID [MsgIDLength]byte
 
 // Message is the fundamental data type containing
 // the id, body, and metadata
 type Message struct {
-	Id        MessageID
+	ID        MessageID
 	Body      []byte
 	Timestamp int64
 	Attempts  uint16
@@ -32,7 +33,7 @@ type Message struct {
 // and returns a pointer
 func NewMessage(id MessageID, body []byte) *Message {
 	return &Message{
-		Id:        id,
+		ID:        id,
 		Body:      body,
 		Timestamp: time.Now().UnixNano(),
 	}
@@ -123,7 +124,7 @@ func (m *Message) WriteTo(w io.Writer) (int64, error) {
 		return total, err
 	}
 
-	n, err = w.Write(m.Id[:])
+	n, err = w.Write(m.ID[:])
 	total += int64(n)
 	if err != nil {
 		return total, err
@@ -147,7 +148,7 @@ func DecodeMessage(b []byte) (*Message, error) {
 
 	buf := bytes.NewBuffer(b[10:])
 
-	_, err := io.ReadFull(buf, msg.Id[:])
+	_, err := io.ReadFull(buf, msg.ID[:])
 	if err != nil {
 		return nil, err
 	}

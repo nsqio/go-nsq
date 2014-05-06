@@ -815,7 +815,7 @@ func (q *Reader) handlerLoop(handler Handler) {
 
 		err := handler.HandleMessage(message)
 		if err != nil {
-			q.log(LogLevelError, "Handler returned error (%s) for msg %s", err, message.Id)
+			q.log(LogLevelError, "Handler returned error (%s) for msg %s", err, message.ID)
 			if !message.IsAutoResponseDisabled() {
 				message.Requeue(-1)
 			}
@@ -838,7 +838,7 @@ func (q *Reader) shouldFailMessage(message *Message, handler interface{}) bool {
 	// message passed the max number of attempts
 	if q.config.maxAttempts > 0 && message.Attempts > q.config.maxAttempts {
 		q.log(LogLevelWarning, "msg %s attempted %d times, giving up",
-			message.Id, message.Attempts)
+			message.ID, message.Attempts)
 
 		logger, ok := handler.(FailedMessageLogger)
 		if ok {
