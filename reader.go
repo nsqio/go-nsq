@@ -27,6 +27,18 @@ type Handler interface {
 	HandleMessage(message *Message) error
 }
 
+// HandlerFunc is a convenience type to avoid having to declare a struct
+// to implement the Handler interface, it can be used like this:
+//
+// 	reader.AddHandler(nsq.HandlerFunc(func(m *Message) error {
+// 		// handle the message
+// 	})
+type HandlerFunc func(message *Message) error
+
+func (h HandlerFunc) HandleMessage(m *Message) error {
+	return h(m)
+}
+
 // FailedMessageLogger is an interface that can be implemented by handlers that wish
 // to receive a callback when a message is deemed "failed" (i.e. the number of attempts
 // exceeded the Reader specified MaxAttemptCount)
