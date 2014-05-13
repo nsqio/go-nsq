@@ -390,14 +390,14 @@ func (q *Reader) ConnectToNSQ(addr string) error {
 		return errors.New("no handlers")
 	}
 
+	_, pendingOk := q.pendingConnections[addr]
 	q.RLock()
 	_, ok := q.connections[addr]
-	_, pendingOk := q.pendingConnections[addr]
+	q.RUnlock()
+
 	if ok || pendingOk {
-		q.RUnlock()
 		return ErrAlreadyConnected
 	}
-	q.RUnlock()
 
 	log.Printf("[%s] connecting to nsqd", addr)
 
@@ -498,8 +498,8 @@ func (q *Reader) ConnectToNSQ(addr string) error {
 			conn, q.TopicName, q.ChannelName, err.Error())
 	}
 
-	q.Lock()
 	delete(q.pendingConnections, addr)
+	q.Lock()
 	q.connections[addr] = conn
 	q.Unlock()
 
