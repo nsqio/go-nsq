@@ -4,4 +4,4 @@
 // producers as well as low-level functions to communicate over the NSQ protocol.
 package nsq
 
-const VERSION = "0.3.7-alpha"
+const VERSION = "0.3.7"

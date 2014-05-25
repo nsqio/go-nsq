@@ -1,5 +1,16 @@
 ## go-nsq Change Log
 
+### 0.3.7 - 2014-05-25
+
+**Upgrading from 0.3.6**: There are no backward incompatible changes. **THIS IS THE LAST STABLE
+RELEASE PROVIDING THIS API**. Future releases will be based on the api in #30 and **will not be
+backwards compatible!**
+
+This is a bug fix release relating to the refactoring done in `0.3.6`.
+
+ * #32 - fix potential panic for race condition when # conns == 0
+ * #33/#34 - more granular connection locking
+
 ### 0.3.6 - 2014-04-29
 
 **Upgrading from 0.3.5**: There are no backward incompatible changes.
