@@ -119,9 +119,9 @@ func NewConfig() *Config {
 //
 // 	default_requeue_delay: the default duration when REQueueing
 //
-// 	backoff_multiplier: the unit of time for calculating reader backoff
+// 	backoff_multiplier: the unit of time for calculating consumer backoff
 //
-// 	max_attempts: maximum number of times this reader will attempt to process a message
+// 	max_attempts: maximum number of times this consumer will attempt to process a message
 //
 // 	low_rdy_idle_timeout: the amount of time in seconds to wait for a message from a producer
 // 	                      when in a state where RDY counts are re-distributed

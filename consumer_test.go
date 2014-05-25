@@ -17,7 +17,7 @@ import (
 
 type MyTestHandler struct {
 	t                *testing.T
-	q                *Reader
+	q                *Consumer
 	messagesSent     int
 	messagesReceived int
 	messagesFailed   int
@@ -59,31 +59,31 @@ func SendMessage(t *testing.T, port int, topic string, method string, body []byt
 	resp.Body.Close()
 }
 
-func TestReader(t *testing.T) {
-	readerTest(t, false, false, false)
+func TestConsumer(t *testing.T) {
+	consumerTest(t, false, false, false)
 }
 
-func TestReaderTLS(t *testing.T) {
-	readerTest(t, false, false, true)
+func TestConsumerTLS(t *testing.T) {
+	consumerTest(t, false, false, true)
 }
 
-func TestReaderDeflate(t *testing.T) {
-	readerTest(t, true, false, false)
+func TestConsumerDeflate(t *testing.T) {
+	consumerTest(t, true, false, false)
 }
 
-func TestReaderSnappy(t *testing.T) {
-	readerTest(t, false, true, false)
+func TestConsumerSnappy(t *testing.T) {
+	consumerTest(t, false, true, false)
 }
 
-func TestReaderTLSDeflate(t *testing.T) {
-	readerTest(t, true, false, true)
+func TestConsumerTLSDeflate(t *testing.T) {
+	consumerTest(t, true, false, true)
 }
 
-func TestReaderTLSSnappy(t *testing.T) {
-	readerTest(t, false, true, true)
+func TestConsumerTLSSnappy(t *testing.T) {
+	consumerTest(t, false, true, true)
 }
 
-func readerTest(t *testing.T, deflate bool, snappy bool, tlsv1 bool) {
+func consumerTest(t *testing.T, deflate bool, snappy bool, tlsv1 bool) {
 	logger := log.New(ioutil.Discard, "", log.LstdFlags)
 
 	topicName := "rdr_test"
@@ -112,7 +112,7 @@ func readerTest(t *testing.T, deflate bool, snappy bool, tlsv1 bool) {
 			InsecureSkipVerify: true,
 		})
 	}
-	q, _ := NewReader(topicName, "ch", config)
+	q, _ := NewConsumer(topicName, "ch", config)
 	q.SetLogger(logger, LogLevelInfo)
 
 	h := &MyTestHandler{

@@ -10,19 +10,19 @@ import (
 	"time"
 )
 
-type ReaderHandler struct {
+type ConsumerHandler struct {
 	t              *testing.T
-	q              *Reader
+	q              *Consumer
 	messagesGood   int
 	messagesFailed int
 }
 
-func (h *ReaderHandler) LogFailedMessage(message *Message) {
+func (h *ConsumerHandler) LogFailedMessage(message *Message) {
 	h.messagesFailed++
 	h.q.Stop()
 }
 
-func (h *ReaderHandler) HandleMessage(message *Message) error {
+func (h *ConsumerHandler) HandleMessage(message *Message) error {
 	msg := string(message.Body)
 	if msg == "bad_test_case" {
 		return errors.New("fail this message")
@@ -34,12 +34,12 @@ func (h *ReaderHandler) HandleMessage(message *Message) error {
 	return nil
 }
 
-func TestWriterConnection(t *testing.T) {
+func TestProducerConnection(t *testing.T) {
 	log.SetOutput(ioutil.Discard)
 	defer log.SetOutput(os.Stdout)
 
 	config := NewConfig()
-	w := NewWriter("127.0.0.1:4150", config)
+	w := NewProducer("127.0.0.1:4150", config)
 
 	err := w.Publish("write_test", []byte("test"))
 	if err != nil {
@@ -54,7 +54,7 @@ func TestWriterConnection(t *testing.T) {
 	}
 }
 
-func TestWriterPublish(t *testing.T) {
+func TestProducerPublish(t *testing.T) {
 	log.SetOutput(ioutil.Discard)
 	defer log.SetOutput(os.Stdout)
 
@@ -62,7 +62,7 @@ func TestWriterPublish(t *testing.T) {
 	msgCount := 10
 
 	config := NewConfig()
-	w := NewWriter("127.0.0.1:4150", config)
+	w := NewProducer("127.0.0.1:4150", config)
 	defer w.Stop()
 
 	for i := 0; i < msgCount; i++ {
@@ -80,7 +80,7 @@ func TestWriterPublish(t *testing.T) {
 	readMessages(topicName, t, msgCount)
 }
 
-func TestWriterMultiPublish(t *testing.T) {
+func TestProducerMultiPublish(t *testing.T) {
 	log.SetOutput(ioutil.Discard)
 	defer log.SetOutput(os.Stdout)
 
@@ -88,7 +88,7 @@ func TestWriterMultiPublish(t *testing.T) {
 	msgCount := 10
 
 	config := NewConfig()
-	w := NewWriter("127.0.0.1:4150", config)
+	w := NewProducer("127.0.0.1:4150", config)
 	defer w.Stop()
 
 	var testData [][]byte
@@ -109,7 +109,7 @@ func TestWriterMultiPublish(t *testing.T) {
 	readMessages(topicName, t, msgCount)
 }
 
-func TestWriterPublishAsync(t *testing.T) {
+func TestProducerPublishAsync(t *testing.T) {
 	log.SetOutput(ioutil.Discard)
 	defer log.SetOutput(os.Stdout)
 
@@ -117,10 +117,10 @@ func TestWriterPublishAsync(t *testing.T) {
 	msgCount := 10
 
 	config := NewConfig()
-	w := NewWriter("127.0.0.1:4150", config)
+	w := NewProducer("127.0.0.1:4150", config)
 	defer w.Stop()
 
-	responseChan := make(chan *WriterTransaction, msgCount)
+	responseChan := make(chan *ProducerTransaction, msgCount)
 	for i := 0; i < msgCount; i++ {
 		err := w.PublishAsync(topicName, []byte("publish_test_case"), responseChan, "test")
 		if err != nil {
@@ -146,7 +146,7 @@ func TestWriterPublishAsync(t *testing.T) {
 	readMessages(topicName, t, msgCount)
 }
 
-func TestWriterMultiPublishAsync(t *testing.T) {
+func TestProducerMultiPublishAsync(t *testing.T) {
 	log.SetOutput(ioutil.Discard)
 	defer log.SetOutput(os.Stdout)
 
@@ -154,7 +154,7 @@ func TestWriterMultiPublishAsync(t *testing.T) {
 	msgCount := 10
 
 	config := NewConfig()
-	w := NewWriter("127.0.0.1:4150", config)
+	w := NewProducer("127.0.0.1:4150", config)
 	defer w.Stop()
 
 	var testData [][]byte
@@ -162,7 +162,7 @@ func TestWriterMultiPublishAsync(t *testing.T) {
 		testData = append(testData, []byte("multipublish_test_case"))
 	}
 
-	responseChan := make(chan *WriterTransaction)
+	responseChan := make(chan *ProducerTransaction)
 	err := w.MultiPublishAsync(topicName, testData, responseChan, "test0", 1)
 	if err != nil {
 		t.Fatalf(err.Error())
@@ -187,7 +187,7 @@ func TestWriterMultiPublishAsync(t *testing.T) {
 	readMessages(topicName, t, msgCount)
 }
 
-func TestWriterHeartbeat(t *testing.T) {
+func TestProducerHeartbeat(t *testing.T) {
 	log.SetOutput(ioutil.Discard)
 	defer log.SetOutput(os.Stdout)
 
@@ -195,7 +195,7 @@ func TestWriterHeartbeat(t *testing.T) {
 
 	config := NewConfig()
 	config.Set("heartbeat_interval", 100*time.Millisecond)
-	w := NewWriter("127.0.0.1:4150", config)
+	w := NewProducer("127.0.0.1:4150", config)
 	defer w.Stop()
 
 	err := w.Publish(topicName, []byte("publish_test_case"))
@@ -209,7 +209,7 @@ func TestWriterHeartbeat(t *testing.T) {
 
 	config = NewConfig()
 	config.Set("heartbeat_interval", 1000*time.Millisecond)
-	w = NewWriter("127.0.0.1:4150", config)
+	w = NewProducer("127.0.0.1:4150", config)
 	defer w.Stop()
 
 	err = w.Publish(topicName, []byte("publish_test_case"))
@@ -240,9 +240,9 @@ func readMessages(topicName string, t *testing.T, msgCount int) {
 	config.Set("verbose", true)
 	config.Set("default_requeue_delay", 0)
 	config.Set("max_backoff_duration", time.Millisecond*50)
-	q, _ := NewReader(topicName, "ch", config)
+	q, _ := NewConsumer(topicName, "ch", config)
 
-	h := &ReaderHandler{
+	h := &ConsumerHandler{
 		t: t,
 		q: q,
 	}

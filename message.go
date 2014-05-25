@@ -107,7 +107,7 @@ func (m *Message) doRequeue(delay time.Duration, backoff bool) {
 }
 
 // WriteTo implements the WriterTo interface and serializes
-// the message into the supplied writer.
+// the message into the supplied producer.
 //
 // It is suggested that the target Writer is buffered to
 // avoid performing many system calls.

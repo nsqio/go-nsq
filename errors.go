@@ -6,17 +6,17 @@ import (
 )
 
 // ErrNotConnected is returned when a publish command is made
-// against a Writer that is not connected
+// against a Producer that is not connected
 var ErrNotConnected = errors.New("not connected")
 
 // ErrStopped is returned when a publish command is
-// made against a Writer that has been stopped
+// made against a Producer that has been stopped
 var ErrStopped = errors.New("stopped")
 
 // ErrAlreadyConnected is returned from ConnectToNSQD when already connected
 var ErrAlreadyConnected = errors.New("already connected")
 
-// ErrOverMaxInFlight is returned from Reader if over max-in-flight
+// ErrOverMaxInFlight is returned from Consumer if over max-in-flight
 var ErrOverMaxInFlight = errors.New("over configure max-inflight")
 
 // ErrLookupdAddressExists is returned from ConnectToNSQLookupd
@@ -33,7 +33,7 @@ func (e ErrIdentify) Error() string {
 	return fmt.Sprintf("failed to IDENTIFY - %s", e.Reason)
 }
 
-// ErrProtocol is returned from Writer when encountering
+// ErrProtocol is returned from Producer when encountering
 // an NSQ protocol level error
 type ErrProtocol struct {
 	Reason string

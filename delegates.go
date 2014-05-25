@@ -81,36 +81,36 @@ type ConnDelegate interface {
 	OnClose(*Conn)
 }
 
-// keeps the exported Reader struct clean of the exported methods
+// keeps the exported Consumer struct clean of the exported methods
 // required to implement the ConnDelegate interface
-type readerConnDelegate struct {
-	r *Reader
+type consumerConnDelegate struct {
+	r *Consumer
 }
 
-func (d *readerConnDelegate) OnResponse(c *Conn, data []byte)       { d.r.onConnResponse(c, data) }
-func (d *readerConnDelegate) OnError(c *Conn, data []byte)          { d.r.onConnError(c, data) }
-func (d *readerConnDelegate) OnMessage(c *Conn, m *Message)         { d.r.onConnMessage(c, m) }
-func (d *readerConnDelegate) OnMessageFinished(c *Conn, m *Message) { d.r.onConnMessageFinished(c, m) }
-func (d *readerConnDelegate) OnMessageRequeued(c *Conn, m *Message) { d.r.onConnMessageRequeued(c, m) }
-func (d *readerConnDelegate) OnBackoff(c *Conn)                     { d.r.onConnBackoff(c) }
-func (d *readerConnDelegate) OnResume(c *Conn)                      { d.r.onConnResume(c) }
-func (d *readerConnDelegate) OnIOError(c *Conn, err error)          { d.r.onConnIOError(c, err) }
-func (d *readerConnDelegate) OnHeartbeat(c *Conn)                   { d.r.onConnHeartbeat(c) }
-func (d *readerConnDelegate) OnClose(c *Conn)                       { d.r.onConnClose(c) }
+func (d *consumerConnDelegate) OnResponse(c *Conn, data []byte)       { d.r.onConnResponse(c, data) }
+func (d *consumerConnDelegate) OnError(c *Conn, data []byte)          { d.r.onConnError(c, data) }
+func (d *consumerConnDelegate) OnMessage(c *Conn, m *Message)         { d.r.onConnMessage(c, m) }
+func (d *consumerConnDelegate) OnMessageFinished(c *Conn, m *Message) { d.r.onConnMessageFinished(c, m) }
+func (d *consumerConnDelegate) OnMessageRequeued(c *Conn, m *Message) { d.r.onConnMessageRequeued(c, m) }
+func (d *consumerConnDelegate) OnBackoff(c *Conn)                     { d.r.onConnBackoff(c) }
+func (d *consumerConnDelegate) OnResume(c *Conn)                      { d.r.onConnResume(c) }
+func (d *consumerConnDelegate) OnIOError(c *Conn, err error)          { d.r.onConnIOError(c, err) }
+func (d *consumerConnDelegate) OnHeartbeat(c *Conn)                   { d.r.onConnHeartbeat(c) }
+func (d *consumerConnDelegate) OnClose(c *Conn)                       { d.r.onConnClose(c) }
 
-// keeps the exported Writer struct clean of the exported methods
+// keeps the exported Producer struct clean of the exported methods
 // required to implement the ConnDelegate interface
-type writerConnDelegate struct {
-	w *Writer
+type producerConnDelegate struct {
+	w *Producer
 }
 
-func (d *writerConnDelegate) OnResponse(c *Conn, data []byte)       { d.w.onConnResponse(c, data) }
-func (d *writerConnDelegate) OnError(c *Conn, data []byte)          { d.w.onConnError(c, data) }
-func (d *writerConnDelegate) OnMessage(c *Conn, m *Message)         {}
-func (d *writerConnDelegate) OnMessageFinished(c *Conn, m *Message) {}
-func (d *writerConnDelegate) OnMessageRequeued(c *Conn, m *Message) {}
-func (d *writerConnDelegate) OnBackoff(c *Conn)                     {}
-func (d *writerConnDelegate) OnResume(c *Conn)                      {}
-func (d *writerConnDelegate) OnIOError(c *Conn, err error)          { d.w.onConnIOError(c, err) }
-func (d *writerConnDelegate) OnHeartbeat(c *Conn)                   { d.w.onConnHeartbeat(c) }
-func (d *writerConnDelegate) OnClose(c *Conn)                       { d.w.onConnClose(c) }
+func (d *producerConnDelegate) OnResponse(c *Conn, data []byte)       { d.w.onConnResponse(c, data) }
+func (d *producerConnDelegate) OnError(c *Conn, data []byte)          { d.w.onConnError(c, data) }
+func (d *producerConnDelegate) OnMessage(c *Conn, m *Message)         {}
+func (d *producerConnDelegate) OnMessageFinished(c *Conn, m *Message) {}
+func (d *producerConnDelegate) OnMessageRequeued(c *Conn, m *Message) {}
+func (d *producerConnDelegate) OnBackoff(c *Conn)                     {}
+func (d *producerConnDelegate) OnResume(c *Conn)                      {}
+func (d *producerConnDelegate) OnIOError(c *Conn, err error)          { d.w.onConnIOError(c, err) }
+func (d *producerConnDelegate) OnHeartbeat(c *Conn)                   { d.w.onConnHeartbeat(c) }
+func (d *producerConnDelegate) OnClose(c *Conn)                       { d.w.onConnClose(c) }

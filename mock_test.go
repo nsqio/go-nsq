@@ -181,7 +181,7 @@ func (h *testHandler) HandleMessage(message *Message) error {
 	return nil
 }
 
-func TestReaderBackoff(t *testing.T) {
+func TestConsumerBackoff(t *testing.T) {
 	log.SetOutput(ioutil.Discard)
 	defer log.SetOutput(os.Stdout)
 
@@ -216,12 +216,12 @@ func TestReaderBackoff(t *testing.T) {
 	}
 	n := newMockNSQD(script)
 
-	topicName := "test_reader_commands" + strconv.Itoa(int(time.Now().Unix()))
+	topicName := "test_consumer_commands" + strconv.Itoa(int(time.Now().Unix()))
 	config := NewConfig()
 	config.Set("verbose", true)
 	config.Set("max_in_flight", 5)
 	config.Set("backoff_multiplier", 10*time.Millisecond)
-	q, _ := NewReader(topicName, "ch", config)
+	q, _ := NewConsumer(topicName, "ch", config)
 	q.SetLogger(logger, LogLevelDebug)
 	q.SetHandler(&testHandler{})
 	err := q.ConnectToNSQD(n.tcpAddr.String())
