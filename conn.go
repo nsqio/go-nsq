@@ -11,7 +11,6 @@ import (
 	"io"
 	"log"
 	"net"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -29,6 +28,13 @@ type IdentifyResponse struct {
 	Snappy      bool  `json:"snappy"`
 }
 
+type msgResponse struct {
+	msg     *Message
+	cmd     *Command
+	success bool
+	backoff bool
+}
+
 // Conn represents a connection to nsqd
 //
 // Conn exposes a set of callbacks for the
@@ -41,121 +47,67 @@ type Conn struct {
 	lastRdyCount     int64
 	lastMsgTimestamp int64
 
-	sync.Mutex
+	mtx sync.Mutex
 
-	topic   string
-	channel string
+	config *Config
 
-	net.Conn
+	conn    *net.TCPConn
 	tlsConn *tls.Conn
 	addr    string
+
+	Delegate ConnDelegate
+
+	logger *log.Logger
+	logLvl LogLevel
+	logFmt string
 
 	r io.Reader
 	w io.Writer
 
-	// ResponseCB is called when the connection
-	// receives a FrameTypeResponse from nsqd
-	ResponseCB func(*Conn, []byte)
-
-	// ErrorCB is called when the connection
-	// receives a FrameTypeError from nsqd
-	ErrorCB func(*Conn, []byte)
-
-	// MessageCB is called when the connection
-	// receives a FrameTypeMessage from nsqd
-	MessageCB func(*Conn, *Message)
-
-	// MessageProcessedCB is called when the connection
-	// handles a FIN or REQ command from a message handler
-	MessageProcessedCB func(*Conn, *FinishedMessage)
-
-	// IOErrorCB is called when the connection experiences
-	// a low-level TCP transport error
-	IOErrorCB func(*Conn, error)
-
-	// HeartbeatCB is called when the connection
-	// receives a heartbeat from nsqd
-	HeartbeatCB func(*Conn)
-
-	// CloseCB is called when the connection
-	// closes, after all cleanup
-	CloseCB func(*Conn)
-
-	cmdBuf bytes.Buffer
-
-	flateWriter *flate.Writer
-
-	ReadTimeout  time.Duration
-	WriteTimeout time.Duration
-
 	backoffCounter int32
 	rdyRetryTimer  *time.Timer
 
-	finishedMessages chan *FinishedMessage
-	cmdChan          chan *Command
-	exitChan         chan int
-	drainReady       chan int
+	cmdChan         chan *Command
+	msgResponseChan chan *msgResponse
+	exitChan        chan int
+	drainReady      chan int
 
-	ShortIdentifier string // an identifier to send to nsqd when connecting (defaults: short hostname)
-	LongIdentifier  string // an identifier to send to nsqd when connecting (defaults: long hostname)
-
-	HeartbeatInterval time.Duration // duration of time between heartbeats
-	SampleRate        int32         // set the sampleRate of the client's messagePump (requires nsqd 0.2.25+)
-	UserAgent         string        // a string identifying the agent for this client in the spirit of HTTP (default: "<client_library_name>/<version>")
-
-	// transport layer security
-	TLSv1     bool        // negotiate enabling TLS
-	TLSConfig *tls.Config // client TLS configuration
-
-	// compression
-	Deflate      bool // negotiate enabling Deflate compression
-	DeflateLevel int  // the compression level to negotiate for Deflate
-	Snappy       bool // negotiate enabling Snappy compression
-
-	// output buffering
-	OutputBufferSize    int64         // size of the buffer (in bytes) used by nsqd for buffering writes to this connection
-	OutputBufferTimeout time.Duration // timeout (in ms) used by nsqd before flushing buffered writes (set to 0 to disable). Warning: configuring clients with an extremely low (< 25ms) output_buffer_timeout has a significant effect on nsqd CPU usage (particularly with > 50 clients connected).
-
-	stopFlag int32
-	stopper  sync.Once
-	wg       sync.WaitGroup
+	closeFlag int32
+	stopper   sync.Once
+	wg        sync.WaitGroup
 
 	readLoopRunning int32
 }
 
 // NewConn returns a new Conn instance
-func NewConn(addr string, topic string, channel string) *Conn {
-	hostname, err := os.Hostname()
-	if err != nil {
-		log.Fatalf("ERROR: unable to get hostname %s", err.Error())
-	}
+func NewConn(addr string, config *Config) *Conn {
 	return &Conn{
 		addr: addr,
 
-		topic:   topic,
-		channel: channel,
-
-		ReadTimeout:  DefaultClientTimeout,
-		WriteTimeout: time.Second,
+		config: config,
 
 		maxRdyCount:      2500,
 		lastMsgTimestamp: time.Now().UnixNano(),
 
-		finishedMessages: make(chan *FinishedMessage),
-		cmdChan:          make(chan *Command),
-		exitChan:         make(chan int),
-		drainReady:       make(chan int),
+		cmdChan:         make(chan *Command),
+		msgResponseChan: make(chan *msgResponse),
+		exitChan:        make(chan int),
+		drainReady:      make(chan int),
+	}
+}
 
-		ShortIdentifier: strings.Split(hostname, ".")[0],
-		LongIdentifier:  hostname,
-
-		DeflateLevel:        6,
-		OutputBufferSize:    16 * 1024,
-		OutputBufferTimeout: 250 * time.Millisecond,
-
-		HeartbeatInterval: DefaultClientTimeout / 2,
-
-		UserAgent: fmt.Sprintf("go-nsq/%s", VERSION),
+// SetLogger assigns the logger to use as well as a level.
+//
+// The format parameter is expected to be a printf compatible string with
+// a single %s argument.  This is useful if you want to provide additional
+// context to the log messages that the connection will print, the default
+// is '(%s)'.
+func (c *Conn) SetLogger(logger *log.Logger, lvl LogLevel, format string) {
+	c.logger = logger
+	c.logLvl = lvl
+	c.logFmt = format
+	if c.logFmt == "" {
+		c.logFmt = "(%s)"
 	}
 }
 
@@ -166,7 +118,7 @@ func (c *Conn) Connect() (*IdentifyResponse, error) {
 	if err != nil {
 		return nil, err
 	}
-	c.Conn = conn
+	c.conn = conn.(*net.TCPConn)
 	c.r = conn
 	c.w = conn
 
@@ -188,28 +140,20 @@ func (c *Conn) Connect() (*IdentifyResponse, error) {
 	return resp, nil
 }
 
-// Close idempotently closes the connection
+// Close idempotently initiates connection close
 func (c *Conn) Close() error {
-	// so that external users dont need
-	// to do this dance...
-	// (would only happen if the dial failed)
-	if c.Conn == nil {
-		return nil
+	atomic.StoreInt32(&c.closeFlag, 1)
+	if c.conn != nil && atomic.LoadInt64(&c.messagesInFlight) == 0 {
+		return c.conn.CloseRead()
 	}
-	return c.Conn.Close()
+	return nil
 }
 
-// Stop gracefully initiates connection close
-// allowing in-flight messages to finish
-func (c *Conn) Stop() {
-	atomic.StoreInt32(&c.stopFlag, 1)
-}
-
-// IsStopping indicates whether or not the
+// IsClosing indicates whether or not the
 // connection is currently in the processing of
 // gracefully closing
-func (c *Conn) IsStopping() bool {
-	return atomic.LoadInt32(&c.stopFlag) == 1
+func (c *Conn) IsClosing() bool {
+	return atomic.LoadInt32(&c.closeFlag) == 1
 }
 
 // RDY returns the current RDY count
@@ -240,90 +184,89 @@ func (c *Conn) LastMessageTime() time.Time {
 	return time.Unix(0, atomic.LoadInt64(&c.lastMsgTimestamp))
 }
 
-// Address returns the configured destination nsqd address
-func (c *Conn) Address() string {
-	return c.addr
+// RemoteAddr returns the configured destination nsqd address
+func (c *Conn) RemoteAddr() net.Addr {
+	return c.conn.RemoteAddr()
 }
 
-// String returns the fully-qualified address/topic/channel
+// String returns the fully-qualified address
 func (c *Conn) String() string {
-	return fmt.Sprintf("%s/%s/%s", c.addr, c.topic, c.channel)
+	return c.addr
 }
 
 // Read performs a deadlined read on the underlying TCP connection
 func (c *Conn) Read(p []byte) (int, error) {
-	c.SetReadDeadline(time.Now().Add(c.ReadTimeout))
+	c.conn.SetReadDeadline(time.Now().Add(c.config.readTimeout))
 	return c.r.Read(p)
 }
 
 // Write performs a deadlined write on the underlying TCP connection
 func (c *Conn) Write(p []byte) (int, error) {
-	c.SetWriteDeadline(time.Now().Add(c.WriteTimeout))
+	c.conn.SetWriteDeadline(time.Now().Add(c.config.writeTimeout))
 	return c.w.Write(p)
 }
 
-// SendCommand writes the specified Command to the underlying
-// TCP connection according to the NSQ TCP protocol spec
-func (c *Conn) SendCommand(cmd *Command) error {
-	c.Lock()
-	defer c.Unlock()
+// WriteCommand is a goroutine safe method to write a Command
+// to this connection, and flush.
+func (c *Conn) WriteCommand(cmd *Command) error {
+	c.mtx.Lock()
 
-	c.cmdBuf.Reset()
-	err := cmd.Write(&c.cmdBuf)
+	_, err := cmd.WriteTo(c)
 	if err != nil {
-		return err
+		goto exit
 	}
+	err = c.Flush()
 
-	_, err = c.cmdBuf.WriteTo(c)
+exit:
+	c.mtx.Unlock()
 	if err != nil {
-		return err
+		c.log(LogLevelError, "IO error - %s", err)
+		c.Delegate.OnIOError(c, err)
 	}
-
-	if c.flateWriter != nil {
-		return c.flateWriter.Flush()
-	}
-
-	return nil
+	return err
 }
 
-// ReadUnpackedResponse reads and parses data from the underlying
-// TCP connection according to the NSQ TCP protocol spec and
-// returns the frameType, data or error
-func (c *Conn) ReadUnpackedResponse() (int32, []byte, error) {
-	resp, err := ReadResponse(c)
-	if err != nil {
-		return -1, nil, err
+type flusher interface {
+	Flush() error
+}
+
+// Flush writes all buffered data to the underlying TCP connection
+func (c *Conn) Flush() error {
+	if f, ok := c.w.(flusher); ok {
+		return f.Flush()
 	}
-	return UnpackResponse(resp)
+	return nil
 }
 
 func (c *Conn) identify() (*IdentifyResponse, error) {
 	ci := make(map[string]interface{})
-	ci["short_id"] = c.ShortIdentifier
-	ci["long_id"] = c.LongIdentifier
-	ci["tls_v1"] = c.TLSv1
-	ci["deflate"] = c.Deflate
-	ci["deflate_level"] = c.DeflateLevel
-	ci["snappy"] = c.Snappy
+	ci["client_id"] = c.config.clientID
+	ci["hostname"] = c.config.hostname
+	ci["user_agent"] = c.config.userAgent
+	ci["short_id"] = c.config.clientID // deprecated
+	ci["long_id"] = c.config.hostname  // deprecated
+	ci["tls_v1"] = c.config.tlsV1
+	ci["deflate"] = c.config.deflate
+	ci["deflate_level"] = c.config.deflateLevel
+	ci["snappy"] = c.config.snappy
 	ci["feature_negotiation"] = true
-	ci["heartbeat_interval"] = int64(c.HeartbeatInterval / time.Millisecond)
-	ci["sample_rate"] = c.SampleRate
-	ci["user_agent"] = c.UserAgent
-	ci["output_buffer_size"] = c.OutputBufferSize
-	ci["output_buffer_timeout"] = int64(c.OutputBufferTimeout / time.Millisecond)
+	ci["heartbeat_interval"] = int64(c.config.heartbeatInterval / time.Millisecond)
+	ci["sample_rate"] = c.config.sampleRate
+	ci["output_buffer_size"] = c.config.outputBufferSize
+	ci["output_buffer_timeout"] = int64(c.config.outputBufferTimeout / time.Millisecond)
 	cmd, err := Identify(ci)
 	if err != nil {
-		return nil, ErrIdentify{Reason: err.Error()}
+		return nil, ErrIdentify{err.Error()}
 	}
 
-	err = c.SendCommand(cmd)
+	err = c.WriteCommand(cmd)
 	if err != nil {
-		return nil, ErrIdentify{Reason: err.Error()}
+		return nil, ErrIdentify{err.Error()}
 	}
 
-	frameType, data, err := c.ReadUnpackedResponse()
+	frameType, data, err := ReadUnpackedResponse(c)
 	if err != nil {
-		return nil, ErrIdentify{Reason: err.Error()}
+		return nil, ErrIdentify{err.Error()}
 	}
 
 	if frameType == FrameTypeError {
@@ -342,23 +285,28 @@ func (c *Conn) identify() (*IdentifyResponse, error) {
 		return nil, ErrIdentify{err.Error()}
 	}
 
+	c.log(LogLevelDebug, "IDENTIFY response: %+v", resp)
+
 	c.maxRdyCount = resp.MaxRdyCount
 
 	if resp.TLSv1 {
-		err := c.upgradeTLS(c.TLSConfig)
+		c.log(LogLevelInfo, "upgrading to TLS")
+		err := c.upgradeTLS(c.config.tlsConfig)
 		if err != nil {
 			return nil, ErrIdentify{err.Error()}
 		}
 	}
 
 	if resp.Deflate {
-		err := c.upgradeDeflate(c.DeflateLevel)
+		c.log(LogLevelInfo, "upgrading to Deflate")
+		err := c.upgradeDeflate(c.config.deflateLevel)
 		if err != nil {
 			return nil, ErrIdentify{err.Error()}
 		}
 	}
 
 	if resp.Snappy {
+		c.log(LogLevelInfo, "upgrading to Snappy")
 		err := c.upgradeSnappy()
 		if err != nil {
 			return nil, ErrIdentify{err.Error()}
@@ -366,20 +314,24 @@ func (c *Conn) identify() (*IdentifyResponse, error) {
 	}
 
 	// now that connection is bootstrapped, enable read buffering
+	// (and write buffering if it's not already capable of Flush())
 	c.r = bufio.NewReader(c.r)
+	if _, ok := c.w.(flusher); !ok {
+		c.w = bufio.NewWriter(c.w)
+	}
 
 	return resp, nil
 }
 
 func (c *Conn) upgradeTLS(conf *tls.Config) error {
-	c.tlsConn = tls.Client(c.Conn, conf)
+	c.tlsConn = tls.Client(c.conn, conf)
 	err := c.tlsConn.Handshake()
 	if err != nil {
 		return err
 	}
 	c.r = c.tlsConn
 	c.w = c.tlsConn
-	frameType, data, err := c.ReadUnpackedResponse()
+	frameType, data, err := ReadUnpackedResponse(c)
 	if err != nil {
 		return err
 	}
@@ -390,15 +342,14 @@ func (c *Conn) upgradeTLS(conf *tls.Config) error {
 }
 
 func (c *Conn) upgradeDeflate(level int) error {
-	conn := c.Conn
+	conn := net.Conn(c.conn)
 	if c.tlsConn != nil {
 		conn = c.tlsConn
 	}
-	c.r = flate.NewReader(conn)
 	fw, _ := flate.NewWriter(conn, level)
-	c.flateWriter = fw
+	c.r = flate.NewReader(conn)
 	c.w = fw
-	frameType, data, err := c.ReadUnpackedResponse()
+	frameType, data, err := ReadUnpackedResponse(c)
 	if err != nil {
 		return err
 	}
@@ -409,13 +360,13 @@ func (c *Conn) upgradeDeflate(level int) error {
 }
 
 func (c *Conn) upgradeSnappy() error {
-	conn := c.Conn
+	conn := net.Conn(c.conn)
 	if c.tlsConn != nil {
 		conn = c.tlsConn
 	}
 	c.r = snappystream.NewReader(conn, snappystream.SkipVerifyChecksum)
 	c.w = snappystream.NewWriter(conn)
-	frameType, data, err := c.ReadUnpackedResponse()
+	frameType, data, err := ReadUnpackedResponse(c)
 	if err != nil {
 		return err
 	}
@@ -427,21 +378,26 @@ func (c *Conn) upgradeSnappy() error {
 
 func (c *Conn) readLoop() {
 	for {
-		if atomic.LoadInt32(&c.stopFlag) == 1 {
+		if atomic.LoadInt32(&c.closeFlag) == 1 {
 			goto exit
 		}
 
-		frameType, data, err := c.ReadUnpackedResponse()
+		frameType, data, err := ReadUnpackedResponse(c)
 		if err != nil {
-			c.IOErrorCB(c, err)
+			if !strings.Contains(err.Error(), "use of closed network connection") {
+				c.log(LogLevelError, "IO error - %s", err)
+				c.Delegate.OnIOError(c, err)
+			}
 			goto exit
 		}
 
 		if frameType == FrameTypeResponse && bytes.Equal(data, []byte("_heartbeat_")) {
-			c.HeartbeatCB(c)
-			err := c.SendCommand(Nop())
+			c.log(LogLevelDebug, "heartbeat received")
+			c.Delegate.OnHeartbeat(c)
+			err := c.WriteCommand(Nop())
 			if err != nil {
-				c.IOErrorCB(c, err)
+				c.log(LogLevelError, "IO error - %s", err)
+				c.Delegate.OnIOError(c, err)
 				goto exit
 			}
 			continue
@@ -449,26 +405,27 @@ func (c *Conn) readLoop() {
 
 		switch frameType {
 		case FrameTypeResponse:
-			c.ResponseCB(c, data)
+			c.Delegate.OnResponse(c, data)
 		case FrameTypeMessage:
 			msg, err := DecodeMessage(data)
 			if err != nil {
-				c.IOErrorCB(c, err)
+				c.log(LogLevelError, "IO error - %s", err)
+				c.Delegate.OnIOError(c, err)
 				goto exit
 			}
-			msg.cmdChan = c.cmdChan
-			msg.responseChan = c.finishedMessages
-			msg.exitChan = c.exitChan
+			msg.Delegate = &connMessageDelegate{c}
 
 			atomic.AddInt64(&c.rdyCount, -1)
 			atomic.AddInt64(&c.messagesInFlight, 1)
 			atomic.StoreInt64(&c.lastMsgTimestamp, time.Now().UnixNano())
 
-			c.MessageCB(c, msg)
+			c.Delegate.OnMessage(c, msg)
 		case FrameTypeError:
-			c.ErrorCB(c, data)
+			c.log(LogLevelError, "protocol error - %s", data)
+			c.Delegate.OnError(c, data)
 		default:
-			c.IOErrorCB(c, fmt.Errorf("unknown frame type %d", frameType))
+			c.log(LogLevelError, "IO error - %s", err)
+			c.Delegate.OnIOError(c, fmt.Errorf("unknown frame type %d", frameType))
 		}
 	}
 
@@ -482,51 +439,54 @@ exit:
 		// writeLoop won't
 		c.close()
 	} else {
-		log.Printf("[%s] delaying close, %d outstanding messages",
-			c, messagesInFlight)
+		c.log(LogLevelWarning, "delaying close, %d outstanding messages", messagesInFlight)
 	}
 	c.wg.Done()
-	log.Printf("[%s] readLoop exiting", c)
+	c.log(LogLevelInfo, "readLoop exiting")
 }
 
 func (c *Conn) writeLoop() {
 	for {
 		select {
 		case <-c.exitChan:
-			log.Printf("[%s] breaking out of writeLoop", c)
-			// Indicate drainReady because we will not pull any more off finishedMessages
+			c.log(LogLevelInfo, "breaking out of writeLoop")
+			// Indicate drainReady because we will not pull any more off msgResponseChan
 			close(c.drainReady)
 			goto exit
 		case cmd := <-c.cmdChan:
-			err := c.SendCommand(cmd)
+			err := c.WriteCommand(cmd)
 			if err != nil {
-				log.Printf("[%s] error sending command %s - %s", c, cmd, err)
+				c.log(LogLevelError, "error sending command %s - %s", cmd, err)
 				c.close()
 				continue
 			}
-		case finishedMsg := <-c.finishedMessages:
+		case resp := <-c.msgResponseChan:
 			// Decrement this here so it is correct even if we can't respond to nsqd
 			msgsInFlight := atomic.AddInt64(&c.messagesInFlight, -1)
 
-			if finishedMsg.Success {
-				err := c.SendCommand(Finish(finishedMsg.Id))
-				if err != nil {
-					log.Printf("[%s] error finishing %s - %s", c, finishedMsg.Id, err.Error())
-					c.close()
-					continue
+			err := c.WriteCommand(resp.cmd)
+			if err != nil {
+				c.log(LogLevelError, "error sending command %s - %s", resp.cmd, err)
+				c.close()
+				continue
+			}
+
+			if resp.success {
+				c.log(LogLevelDebug, "FIN %s", resp.msg.ID)
+				c.Delegate.OnMessageFinished(c, resp.msg)
+				if resp.backoff {
+					c.Delegate.OnResume(c)
 				}
 			} else {
-				err := c.SendCommand(Requeue(finishedMsg.Id, finishedMsg.RequeueDelayMs))
-				if err != nil {
-					log.Printf("[%s] error requeueing %s - %s", c, finishedMsg.Id, err.Error())
-					c.close()
-					continue
+				c.log(LogLevelDebug, "REQ %s", resp.msg.ID)
+				c.Delegate.OnMessageRequeued(c, resp.msg)
+				if resp.backoff {
+					c.Delegate.OnBackoff(c)
 				}
 			}
 
-			c.MessageProcessedCB(c, finishedMsg)
-
-			if msgsInFlight == 0 && atomic.LoadInt32(&c.stopFlag) == 1 {
+			if msgsInFlight == 0 &&
+				atomic.LoadInt32(&c.closeFlag) == 1 {
 				c.close()
 				continue
 			}
@@ -535,7 +495,7 @@ func (c *Conn) writeLoop() {
 
 exit:
 	c.wg.Done()
-	log.Printf("[%s] writeLoop exiting", c)
+	c.log(LogLevelInfo, "writeLoop exiting")
 }
 
 func (c *Conn) close() {
@@ -543,10 +503,10 @@ func (c *Conn) close() {
 	//
 	//     1. CLOSE cmd sent to nsqd
 	//     2. CLOSE_WAIT response received from nsqd
-	//     3. set c.stopFlag
+	//     3. set c.closeFlag
 	//     4. readLoop() exits
 	//         a. if messages-in-flight > 0 delay close()
-	//             i. writeLoop() continues receiving on c.finishedMessages chan
+	//             i. writeLoop() continues receiving on c.msgResponseChan chan
 	//                 x. when messages-in-flight == 0 call close()
 	//         b. else call close() immediately
 	//     5. c.exitChan close
@@ -555,18 +515,19 @@ func (c *Conn) close() {
 	//     6a. launch cleanup() goroutine (we're racing with intraprocess
 	//        routed messages, see comments below)
 	//         a. wait on c.drainReady
-	//         b. loop and receive on c.finishedMessages chan
+	//         b. loop and receive on c.msgResponseChan chan
 	//            until messages-in-flight == 0
 	//            i. ensure that readLoop has exited
 	//     6b. launch waitForCleanup() goroutine
 	//         b. wait on waitgroup (covers readLoop() and writeLoop()
 	//            and cleanup goroutine)
 	//         c. underlying TCP connection close
-	//         d. trigger CloseCB()
+	//         d. trigger Delegate OnClose()
 	//
 	c.stopper.Do(func() {
-		log.Printf("[%s] beginning close", c)
+		c.log(LogLevelInfo, "beginning close")
 		close(c.exitChan)
+		c.conn.CloseRead()
 
 		c.wg.Add(1)
 		go c.cleanup()
@@ -578,30 +539,26 @@ func (c *Conn) close() {
 func (c *Conn) cleanup() {
 	<-c.drainReady
 	ticker := time.NewTicker(100 * time.Millisecond)
-	// finishLoop has exited, drain any remaining in flight messages
+	// writeLoop has exited, drain any remaining in flight messages
 	for {
-		// we're racing with router which potentially has a message
-		// for handling...
-		//
-		// infinitely loop until the connection's waitgroup is satisfied,
-		// ensuring that both finishLoop and router have exited, at which
-		// point we can be guaranteed that messagesInFlight accurately
-		// represents whatever is left... continue until 0.
+		// we're racing with readLoop which potentially has a message
+		// for handling so infinitely loop until messagesInFlight == 0
+		// and readLoop has exited
 		var msgsInFlight int64
 		select {
-		case <-c.finishedMessages:
+		case <-c.msgResponseChan:
 			msgsInFlight = atomic.AddInt64(&c.messagesInFlight, -1)
 		case <-ticker.C:
 			msgsInFlight = atomic.LoadInt64(&c.messagesInFlight)
 		}
 		if msgsInFlight > 0 {
-			log.Printf("[%s] draining... waiting for %d messages in flight", c, msgsInFlight)
+			c.log(LogLevelWarning, "draining... waiting for %d messages in flight", msgsInFlight)
 			continue
 		}
 		// until the readLoop has exited we cannot be sure that there
 		// still won't be a race
 		if atomic.LoadInt32(&c.readLoopRunning) == 1 {
-			log.Printf("[%s] draining... readLoop still running", c)
+			c.log(LogLevelWarning, "draining... readLoop still running")
 			continue
 		}
 		goto exit
@@ -610,15 +567,64 @@ func (c *Conn) cleanup() {
 exit:
 	ticker.Stop()
 	c.wg.Done()
-	log.Printf("[%s] finished draining, cleanup exiting", c)
+	c.log(LogLevelInfo, "finished draining, cleanup exiting")
 }
 
 func (c *Conn) waitForCleanup() {
 	// this blocks until readLoop and writeLoop
 	// (and cleanup goroutine above) have exited
 	c.wg.Wait()
-	// actually close the underlying connection
-	c.Close()
-	log.Printf("[%s] clean close complete", c)
-	c.CloseCB(c)
+	c.conn.CloseWrite()
+	c.log(LogLevelInfo, "clean close complete")
+	c.Delegate.OnClose(c)
+}
+
+func (c *Conn) onMessageFinish(m *Message) {
+	c.msgResponseChan <- &msgResponse{m, Finish(m.ID), true, true}
+}
+
+func (c *Conn) onMessageRequeue(m *Message, delay time.Duration, backoff bool) {
+	if delay == -1 {
+		// linear delay
+		delay = c.config.defaultRequeueDelay * time.Duration(m.Attempts)
+		// bound the requeueDelay to configured max
+		if delay > c.config.maxRequeueDelay {
+			delay = c.config.maxRequeueDelay
+		}
+	}
+	c.msgResponseChan <- &msgResponse{m, Requeue(m.ID, delay), false, backoff}
+}
+
+func (c *Conn) onMessageTouch(m *Message) {
+	select {
+	case c.cmdChan <- Touch(m.ID):
+	case <-c.exitChan:
+	}
+}
+
+func (c *Conn) log(lvl LogLevel, line string, args ...interface{}) {
+	var prefix string
+
+	if c.logger == nil {
+		return
+	}
+
+	if c.logLvl > lvl {
+		return
+	}
+
+	switch lvl {
+	case LogLevelDebug:
+		prefix = "DBG"
+	case LogLevelInfo:
+		prefix = "INF"
+	case LogLevelWarning:
+		prefix = "WRN"
+	case LogLevelError:
+		prefix = "ERR"
+	}
+
+	c.logger.Printf("%-4s %s %s", prefix,
+		fmt.Sprintf(c.logFmt, c.String()),
+		fmt.Sprintf(line, args...))
 }

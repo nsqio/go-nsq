@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -18,7 +17,7 @@ import (
 
 type MyTestHandler struct {
 	t                *testing.T
-	q                *Reader
+	q                *Consumer
 	messagesSent     int
 	messagesReceived int
 	messagesFailed   int
@@ -60,49 +59,33 @@ func SendMessage(t *testing.T, port int, topic string, method string, body []byt
 	resp.Body.Close()
 }
 
-func TestReader(t *testing.T) {
-	log.SetOutput(ioutil.Discard)
-	defer log.SetOutput(os.Stdout)
-
-	readerTest(t, false, false, false)
+func TestConsumer(t *testing.T) {
+	consumerTest(t, false, false, false)
 }
 
-func TestReaderTLS(t *testing.T) {
-	log.SetOutput(ioutil.Discard)
-	defer log.SetOutput(os.Stdout)
-
-	readerTest(t, false, false, true)
+func TestConsumerTLS(t *testing.T) {
+	consumerTest(t, false, false, true)
 }
 
-func TestReaderDeflate(t *testing.T) {
-	log.SetOutput(ioutil.Discard)
-	defer log.SetOutput(os.Stdout)
-
-	readerTest(t, true, false, false)
+func TestConsumerDeflate(t *testing.T) {
+	consumerTest(t, true, false, false)
 }
 
-func TestReaderSnappy(t *testing.T) {
-	log.SetOutput(ioutil.Discard)
-	defer log.SetOutput(os.Stdout)
-
-	readerTest(t, false, true, false)
+func TestConsumerSnappy(t *testing.T) {
+	consumerTest(t, false, true, false)
 }
 
-func TestReaderTLSDeflate(t *testing.T) {
-	log.SetOutput(ioutil.Discard)
-	defer log.SetOutput(os.Stdout)
-
-	readerTest(t, true, false, true)
+func TestConsumerTLSDeflate(t *testing.T) {
+	consumerTest(t, true, false, true)
 }
 
-func TestReaderTLSSnappy(t *testing.T) {
-	log.SetOutput(ioutil.Discard)
-	defer log.SetOutput(os.Stdout)
-
-	readerTest(t, false, true, true)
+func TestConsumerTLSSnappy(t *testing.T) {
+	consumerTest(t, false, true, true)
 }
 
-func readerTest(t *testing.T, deflate bool, snappy bool, tlsv1 bool) {
+func consumerTest(t *testing.T, deflate bool, snappy bool, tlsv1 bool) {
+	logger := log.New(ioutil.Discard, "", log.LstdFlags)
+
 	topicName := "rdr_test"
 	if deflate {
 		topicName = topicName + "_deflate"
@@ -114,31 +97,29 @@ func readerTest(t *testing.T, deflate bool, snappy bool, tlsv1 bool) {
 	}
 	topicName = topicName + strconv.Itoa(int(time.Now().Unix()))
 
-	q, _ := NewReader(topicName, "ch")
-	q.VerboseLogging = true
+	config := NewConfig()
+	config.Set("verbose", true)
 	// so that the test can simulate reaching max requeues and a call to LogFailedMessage
-	q.DefaultRequeueDelay = 0
+	config.Set("default_requeue_delay", 0)
 	// so that the test wont timeout from backing off
-	q.SetMaxBackoffDuration(time.Millisecond * 50)
-
-	if deflate {
-		q.Deflate = true
-		q.DeflateLevel = 6
-	} else if snappy {
-		q.Snappy = true
-	}
+	config.Set("max_backoff_duration", time.Millisecond*50)
+	config.Set("deflate", deflate)
+	config.Set("deflate_level", 6)
+	config.Set("snappy", snappy)
+	config.Set("tls_v1", tlsv1)
 	if tlsv1 {
-		q.TLSv1 = true
-		q.TLSConfig = &tls.Config{
+		config.Set("tls_config", &tls.Config{
 			InsecureSkipVerify: true,
-		}
+		})
 	}
+	q, _ := NewConsumer(topicName, "ch", config)
+	q.SetLogger(logger, LogLevelInfo)
 
 	h := &MyTestHandler{
 		t: t,
 		q: q,
 	}
-	q.AddHandler(h)
+	q.SetHandler(h)
 
 	SendMessage(t, 4151, topicName, "put", []byte(`{"msg":"single"}`))
 	SendMessage(t, 4151, topicName, "mput", []byte("{\"msg\":\"double\"}\n{\"msg\":\"double\"}"))
@@ -146,17 +127,17 @@ func readerTest(t *testing.T, deflate bool, snappy bool, tlsv1 bool) {
 	h.messagesSent = 4
 
 	addr := "127.0.0.1:4150"
-	err := q.ConnectToNSQ(addr)
+	err := q.ConnectToNSQD(addr)
 	if err != nil {
 		t.Fatalf(err.Error())
 	}
 
-	err = q.ConnectToNSQ(addr)
+	err = q.ConnectToNSQD(addr)
 	if err == nil {
 		t.Fatalf("should not be able to connect to the same NSQ twice")
 	}
 
-	<-q.ExitChan
+	<-q.StopChan
 
 	if h.messagesReceived != 8 || h.messagesSent != 4 {
 		t.Fatalf("end of test. should have handled a diff number of messages (got %d, sent %d)", h.messagesReceived, h.messagesSent)

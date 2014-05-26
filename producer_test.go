@@ -10,19 +10,19 @@ import (
 	"time"
 )
 
-type ReaderHandler struct {
+type ConsumerHandler struct {
 	t              *testing.T
-	q              *Reader
+	q              *Consumer
 	messagesGood   int
 	messagesFailed int
 }
 
-func (h *ReaderHandler) LogFailedMessage(message *Message) {
+func (h *ConsumerHandler) LogFailedMessage(message *Message) {
 	h.messagesFailed++
 	h.q.Stop()
 }
 
-func (h *ReaderHandler) HandleMessage(message *Message) error {
+func (h *ConsumerHandler) HandleMessage(message *Message) error {
 	msg := string(message.Body)
 	if msg == "bad_test_case" {
 		return errors.New("fail this message")
@@ -34,58 +34,61 @@ func (h *ReaderHandler) HandleMessage(message *Message) error {
 	return nil
 }
 
-func TestWriterConnection(t *testing.T) {
+func TestProducerConnection(t *testing.T) {
 	log.SetOutput(ioutil.Discard)
 	defer log.SetOutput(os.Stdout)
 
-	w := NewWriter("127.0.0.1:4150")
+	config := NewConfig()
+	w := NewProducer("127.0.0.1:4150", config)
 
-	_, _, err := w.Publish("write_test", []byte("test"))
+	err := w.Publish("write_test", []byte("test"))
 	if err != nil {
 		t.Fatalf("should lazily connect")
 	}
 
 	w.Stop()
 
-	_, _, err = w.Publish("write_test", []byte("fail test"))
+	err = w.Publish("write_test", []byte("fail test"))
 	if err != ErrStopped {
 		t.Fatalf("should not be able to write after Stop()")
 	}
 }
 
-func TestWriterPublish(t *testing.T) {
+func TestProducerPublish(t *testing.T) {
 	log.SetOutput(ioutil.Discard)
 	defer log.SetOutput(os.Stdout)
 
 	topicName := "publish" + strconv.Itoa(int(time.Now().Unix()))
 	msgCount := 10
 
-	w := NewWriter("127.0.0.1:4150")
+	config := NewConfig()
+	w := NewProducer("127.0.0.1:4150", config)
 	defer w.Stop()
 
 	for i := 0; i < msgCount; i++ {
-		frameType, data, err := w.Publish(topicName, []byte("publish_test_case"))
+		err := w.Publish(topicName, []byte("publish_test_case"))
 		if err != nil {
-			t.Fatalf("frametype %d data %s error %s", frameType, string(data), err.Error())
+			t.Fatalf("error %s", err)
 		}
 	}
 
-	frameType, data, err := w.Publish(topicName, []byte("bad_test_case"))
+	err := w.Publish(topicName, []byte("bad_test_case"))
 	if err != nil {
-		t.Fatalf("frametype %d data %s error %s", frameType, string(data), err.Error())
+		t.Fatalf("error %s", err)
 	}
 
 	readMessages(topicName, t, msgCount)
 }
 
-func TestWriterMultiPublish(t *testing.T) {
+func TestProducerMultiPublish(t *testing.T) {
 	log.SetOutput(ioutil.Discard)
 	defer log.SetOutput(os.Stdout)
 
 	topicName := "multi_publish" + strconv.Itoa(int(time.Now().Unix()))
 	msgCount := 10
 
-	w := NewWriter("127.0.0.1:4150")
+	config := NewConfig()
+	w := NewProducer("127.0.0.1:4150", config)
 	defer w.Stop()
 
 	var testData [][]byte
@@ -93,30 +96,31 @@ func TestWriterMultiPublish(t *testing.T) {
 		testData = append(testData, []byte("multipublish_test_case"))
 	}
 
-	frameType, data, err := w.MultiPublish(topicName, testData)
+	err := w.MultiPublish(topicName, testData)
 	if err != nil {
-		t.Fatalf("frametype %d data %s error %s", frameType, string(data), err.Error())
+		t.Fatalf("error %s", err)
 	}
 
-	frameType, data, err = w.Publish(topicName, []byte("bad_test_case"))
+	err = w.Publish(topicName, []byte("bad_test_case"))
 	if err != nil {
-		t.Fatalf("frametype %d data %s error %s", frameType, string(data), err.Error())
+		t.Fatalf("error %s", err)
 	}
 
 	readMessages(topicName, t, msgCount)
 }
 
-func TestWriterPublishAsync(t *testing.T) {
+func TestProducerPublishAsync(t *testing.T) {
 	log.SetOutput(ioutil.Discard)
 	defer log.SetOutput(os.Stdout)
 
 	topicName := "async_publish" + strconv.Itoa(int(time.Now().Unix()))
 	msgCount := 10
 
-	w := NewWriter("127.0.0.1:4150")
+	config := NewConfig()
+	w := NewProducer("127.0.0.1:4150", config)
 	defer w.Stop()
 
-	responseChan := make(chan *WriterTransaction, msgCount)
+	responseChan := make(chan *ProducerTransaction, msgCount)
 	for i := 0; i < msgCount; i++ {
 		err := w.PublishAsync(topicName, []byte("publish_test_case"), responseChan, "test")
 		if err != nil {
@@ -129,30 +133,28 @@ func TestWriterPublishAsync(t *testing.T) {
 		if trans.Error != nil {
 			t.Fatalf(trans.Error.Error())
 		}
-		if trans.FrameType != int32(0) {
-			t.Fatalf("FrameType %d != 0", trans.FrameType)
-		}
 		if trans.Args[0].(string) != "test" {
 			t.Fatalf(`proxied arg "%s" != "test"`, trans.Args[0].(string))
 		}
 	}
 
-	frameType, data, err := w.Publish(topicName, []byte("bad_test_case"))
+	err := w.Publish(topicName, []byte("bad_test_case"))
 	if err != nil {
-		t.Fatalf("frametype %d data %s error %s", frameType, string(data), err.Error())
+		t.Fatalf("error %s", err)
 	}
 
 	readMessages(topicName, t, msgCount)
 }
 
-func TestWriterMultiPublishAsync(t *testing.T) {
+func TestProducerMultiPublishAsync(t *testing.T) {
 	log.SetOutput(ioutil.Discard)
 	defer log.SetOutput(os.Stdout)
 
 	topicName := "multi_publish" + strconv.Itoa(int(time.Now().Unix()))
 	msgCount := 10
 
-	w := NewWriter("127.0.0.1:4150")
+	config := NewConfig()
+	w := NewProducer("127.0.0.1:4150", config)
 	defer w.Stop()
 
 	var testData [][]byte
@@ -160,7 +162,7 @@ func TestWriterMultiPublishAsync(t *testing.T) {
 		testData = append(testData, []byte("multipublish_test_case"))
 	}
 
-	responseChan := make(chan *WriterTransaction)
+	responseChan := make(chan *ProducerTransaction)
 	err := w.MultiPublishAsync(topicName, testData, responseChan, "test0", 1)
 	if err != nil {
 		t.Fatalf(err.Error())
@@ -170,9 +172,6 @@ func TestWriterMultiPublishAsync(t *testing.T) {
 	if trans.Error != nil {
 		t.Fatalf(trans.Error.Error())
 	}
-	if trans.FrameType != int32(0) {
-		t.Fatalf("FrameType %d != 0", trans.FrameType)
-	}
 	if trans.Args[0].(string) != "test0" {
 		t.Fatalf(`proxied arg "%s" != "test0"`, trans.Args[0].(string))
 	}
@@ -180,25 +179,26 @@ func TestWriterMultiPublishAsync(t *testing.T) {
 		t.Fatalf(`proxied arg %d != 1`, trans.Args[1].(int))
 	}
 
-	frameType, data, err := w.Publish(topicName, []byte("bad_test_case"))
+	err = w.Publish(topicName, []byte("bad_test_case"))
 	if err != nil {
-		t.Fatalf("frametype %d data %s error %s", frameType, string(data), err.Error())
+		t.Fatalf("error %s", err)
 	}
 
 	readMessages(topicName, t, msgCount)
 }
 
-func TestWriterHeartbeat(t *testing.T) {
+func TestProducerHeartbeat(t *testing.T) {
 	log.SetOutput(ioutil.Discard)
 	defer log.SetOutput(os.Stdout)
 
 	topicName := "heartbeat" + strconv.Itoa(int(time.Now().Unix()))
 
-	w := NewWriter("127.0.0.1:4150")
+	config := NewConfig()
+	config.Set("heartbeat_interval", 100*time.Millisecond)
+	w := NewProducer("127.0.0.1:4150", config)
 	defer w.Stop()
-	w.HeartbeatInterval = 100 * time.Millisecond
 
-	_, _, err := w.Publish(topicName, []byte("publish_test_case"))
+	err := w.Publish(topicName, []byte("publish_test_case"))
 	if err == nil {
 		t.Fatalf("error should not be nil")
 	}
@@ -207,11 +207,12 @@ func TestWriterHeartbeat(t *testing.T) {
 		t.Fatalf("wrong error - %s", err)
 	}
 
-	w = NewWriter("127.0.0.1:4150")
+	config = NewConfig()
+	config.Set("heartbeat_interval", 1000*time.Millisecond)
+	w = NewProducer("127.0.0.1:4150", config)
 	defer w.Stop()
-	w.HeartbeatInterval = 1000 * time.Millisecond
 
-	_, _, err = w.Publish(topicName, []byte("publish_test_case"))
+	err = w.Publish(topicName, []byte("publish_test_case"))
 	if err != nil {
 		t.Fatalf(err.Error())
 	}
@@ -220,37 +221,38 @@ func TestWriterHeartbeat(t *testing.T) {
 
 	msgCount := 10
 	for i := 0; i < msgCount; i++ {
-		frameType, data, err := w.Publish(topicName, []byte("publish_test_case"))
+		err := w.Publish(topicName, []byte("publish_test_case"))
 		if err != nil {
-			t.Fatalf("frametype %d data %s error %s", frameType, string(data), err.Error())
+			t.Fatalf("error %s", err)
 		}
 	}
 
-	frameType, data, err := w.Publish(topicName, []byte("bad_test_case"))
+	err = w.Publish(topicName, []byte("bad_test_case"))
 	if err != nil {
-		t.Fatalf("frametype %d data %s error %s", frameType, string(data), err.Error())
+		t.Fatalf("error %s", err)
 	}
 
 	readMessages(topicName, t, msgCount+1)
 }
 
 func readMessages(topicName string, t *testing.T, msgCount int) {
-	q, _ := NewReader(topicName, "ch")
-	q.VerboseLogging = true
-	q.DefaultRequeueDelay = 0
-	q.SetMaxBackoffDuration(time.Millisecond * 50)
+	config := NewConfig()
+	config.Set("verbose", true)
+	config.Set("default_requeue_delay", 0)
+	config.Set("max_backoff_duration", time.Millisecond*50)
+	q, _ := NewConsumer(topicName, "ch", config)
 
-	h := &ReaderHandler{
+	h := &ConsumerHandler{
 		t: t,
 		q: q,
 	}
-	q.AddHandler(h)
+	q.SetHandler(h)
 
-	err := q.ConnectToNSQ("127.0.0.1:4150")
+	err := q.ConnectToNSQD("127.0.0.1:4150")
 	if err != nil {
 		t.Fatalf(err.Error())
 	}
-	<-q.ExitChan
+	<-q.StopChan
 
 	if h.messagesGood != msgCount {
 		t.Fatalf("end of test. should have handled a diff number of messages %d != %d", h.messagesGood, msgCount)

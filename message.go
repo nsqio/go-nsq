@@ -5,125 +5,158 @@ import (
 	"encoding/binary"
 	"io"
 	"io/ioutil"
+	"sync/atomic"
 	"time"
 )
 
-// The number of bytes for a Message.Id
-const MsgIdLength = 16
+// The number of bytes for a Message.ID
+const MsgIDLength = 16
 
-type MessageID [MsgIdLength]byte
+// MessageID is the ASCII encoded hexadecimal message ID
+type MessageID [MsgIDLength]byte
 
 // Message is the fundamental data type containing
 // the id, body, and metadata
 type Message struct {
-	Id        MessageID
+	ID        MessageID
 	Body      []byte
 	Timestamp int64
 	Attempts  uint16
 
-	exitChan     chan int
-	cmdChan      chan *Command
-	responseChan chan *FinishedMessage
+	Delegate MessageDelegate
+
+	autoResponseDisabled int32
+	responded            int32
 }
 
 // NewMessage creates a Message, initializes some metadata,
 // and returns a pointer
 func NewMessage(id MessageID, body []byte) *Message {
 	return &Message{
-		Id:        id,
+		ID:        id,
 		Body:      body,
 		Timestamp: time.Now().UnixNano(),
 	}
 }
 
+// DisableAutoResponse disables the automatic response that
+// would normally be sent when a handler.HandleMessage
+// returns (FIN/REQ based on the error value returned).
+//
+// This is useful if you want to batch, buffer, or asynchronously
+// respond to messages.
+func (m *Message) DisableAutoResponse() {
+	atomic.StoreInt32(&m.autoResponseDisabled, 1)
+}
+
+// IsAutoResponseDisabled indicates whether or not this message
+// will be responded to automatically
+func (m *Message) IsAutoResponseDisabled() bool {
+	return atomic.LoadInt32(&m.autoResponseDisabled) == 1
+}
+
+// HasResponded indicates whether or not this message has been responded to
+func (m *Message) HasResponded() bool {
+	return atomic.LoadInt32(&m.responded) == 1
+}
+
+// Finish sends a FIN command to the nsqd which
+// sent this message
+func (m *Message) Finish() {
+	if m.HasResponded() {
+		return
+	}
+	m.Delegate.OnFinish(m)
+	atomic.StoreInt32(&m.responded, 1)
+}
+
 // Touch sends a TOUCH command to the nsqd which
 // sent this message
 func (m *Message) Touch() {
-	select {
-	case m.cmdChan <- Touch(m.Id):
-	case <-m.exitChan:
+	if m.HasResponded() {
+		return
 	}
+	m.Delegate.OnTouch(m)
 }
 
-// Requeue sends a REQUEUE command to the nsqd which
-// sent this message, using the supplied delay
-func (m *Message) Requeue(timeoutMs int) {
-	finishedMessage := &FinishedMessage{
-		Id:             m.Id,
-		RequeueDelayMs: timeoutMs,
-		Success:        false,
-	}
-	m.responseChan <- finishedMessage
-}
-
-// EncodeBytes serializes the message into a new, returned, []byte
-func (m *Message) EncodeBytes() ([]byte, error) {
-	var buf bytes.Buffer
-	err := m.Write(&buf)
-	if err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-// Write serializes the message into the supplied writer.
+// Requeue sends a REQ command to the nsqd which
+// sent this message, using the supplied delay.
 //
-// It is suggested that the target Writer is buffered to avoid performing many system calls.
-func (m *Message) Write(w io.Writer) error {
-	err := binary.Write(w, binary.BigEndian, &m.Timestamp)
+// A delay of -1 will automatically calculate
+// based on the number of attempts and the
+// configured default_requeue_delay
+func (m *Message) Requeue(delay time.Duration) {
+	m.doRequeue(delay, true)
+}
+
+// RequeueWithoutBackoff sends a REQ command to the nsqd which
+// sent this message, using the supplied delay.
+//
+// Notably, using this method to respond does not trigger a backoff
+// event on the configured Delegate.
+func (m *Message) RequeueWithoutBackoff(delay time.Duration) {
+	m.doRequeue(delay, false)
+}
+
+func (m *Message) doRequeue(delay time.Duration, backoff bool) {
+	if m.HasResponded() {
+		return
+	}
+	m.Delegate.OnRequeue(m, delay, backoff)
+	atomic.StoreInt32(&m.responded, 1)
+}
+
+// WriteTo implements the WriterTo interface and serializes
+// the message into the supplied producer.
+//
+// It is suggested that the target Writer is buffered to
+// avoid performing many system calls.
+func (m *Message) WriteTo(w io.Writer) (int64, error) {
+	var buf [10]byte
+	var total int64
+
+	binary.BigEndian.PutUint64(buf[:8], uint64(m.Timestamp))
+	binary.BigEndian.PutUint16(buf[8:10], uint16(m.Attempts))
+
+	n, err := w.Write(buf[:])
+	total += int64(n)
 	if err != nil {
-		return err
+		return total, err
 	}
 
-	err = binary.Write(w, binary.BigEndian, &m.Attempts)
+	n, err = w.Write(m.ID[:])
+	total += int64(n)
 	if err != nil {
-		return err
+		return total, err
 	}
 
-	_, err = w.Write(m.Id[:])
+	n, err = w.Write(m.Body)
+	total += int64(n)
 	if err != nil {
-		return err
+		return total, err
 	}
 
-	_, err = w.Write(m.Body)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return total, nil
 }
 
 // DecodeMessage deseralizes data (as []byte) and creates a new Message
-func DecodeMessage(byteBuf []byte) (*Message, error) {
-	var timestamp int64
-	var attempts uint16
+func DecodeMessage(b []byte) (*Message, error) {
 	var msg Message
 
-	buf := bytes.NewBuffer(byteBuf)
+	msg.Timestamp = int64(binary.BigEndian.Uint64(b[:8]))
+	msg.Attempts = binary.BigEndian.Uint16(b[8:10])
 
-	err := binary.Read(buf, binary.BigEndian, &timestamp)
+	buf := bytes.NewBuffer(b[10:])
+
+	_, err := io.ReadFull(buf, msg.ID[:])
 	if err != nil {
 		return nil, err
 	}
 
-	err = binary.Read(buf, binary.BigEndian, &attempts)
+	msg.Body, err = ioutil.ReadAll(buf)
 	if err != nil {
 		return nil, err
 	}
-
-	_, err = io.ReadFull(buf, msg.Id[:])
-	if err != nil {
-		return nil, err
-	}
-
-	body, err := ioutil.ReadAll(buf)
-	if err != nil {
-		return nil, err
-	}
-
-	msg.Body = body
-	msg.Timestamp = timestamp
-	msg.Attempts = attempts
 
 	return &msg, nil
 }

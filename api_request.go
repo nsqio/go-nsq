@@ -26,8 +26,7 @@ func (c *deadlinedConn) Write(b []byte) (n int, err error) {
 	return c.Conn.Write(b)
 }
 
-// A custom http.Transport with support for deadline timeouts
-func NewDeadlineTransport(timeout time.Duration) *http.Transport {
+func newDeadlineTransport(timeout time.Duration) *http.Transport {
 	transport := &http.Transport{
 		Dial: func(netw, addr string) (net.Conn, error) {
 			c, err := net.DialTimeout(netw, addr, timeout)
@@ -40,12 +39,8 @@ func NewDeadlineTransport(timeout time.Duration) *http.Transport {
 	return transport
 }
 
-// ApiRequest is a helper function to perform an HTTP request
-// and parse our NSQ daemon's expected response format, with deadlines.
-//
-//     {"status_code":200, "status_txt":"OK", "data":{...}}
-func ApiRequest(endpoint string) (*simplejson.Json, error) {
-	httpclient := &http.Client{Transport: NewDeadlineTransport(2 * time.Second)}
+func apiRequest(endpoint string) (*simplejson.Json, error) {
+	httpclient := &http.Client{Transport: newDeadlineTransport(2 * time.Second)}
 	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
 		return nil, err

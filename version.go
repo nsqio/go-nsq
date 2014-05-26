@@ -1,7 +1,8 @@
-// nsq is the official Go package for https://github.com/bitly/nsq
+// Package nsq is the official Go package for NSQ (https://github.com/bitly/nsq)
 //
-// It provides high-level Reader and Writer types to implement consumers and
-// producers as well as low-level functions to communicate over the NSQ protocol.
+// It provides high-level Consumer and Producer types (to implement consumers and
+// producers) as well as low-level functions to communicate over the NSQ protocol
 package nsq
 
-const VERSION = "0.3.7"
+// VERSION
+const VERSION = "1.0.0-alpha"

@@ -181,17 +181,23 @@ func (h *testHandler) HandleMessage(message *Message) error {
 	return nil
 }
 
-func TestReaderBackoff(t *testing.T) {
+func TestConsumerBackoff(t *testing.T) {
 	log.SetOutput(ioutil.Discard)
 	defer log.SetOutput(os.Stdout)
 
-	msgIdGood := MessageID{'1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'a', 's', 'd', 'f', 'g', 'h'}
-	msgGood := NewMessage(msgIdGood, []byte("good"))
-	msgBytesGood, _ := msgGood.EncodeBytes()
+	logger := log.New(ioutil.Discard, "", log.LstdFlags)
 
-	msgIdBad := MessageID{'z', 'x', 'c', 'v', 'b', '6', '7', '8', '9', '0', 'a', 's', 'd', 'f', 'g', 'h'}
-	msgBad := NewMessage(msgIdBad, []byte("bad"))
-	msgBytesBad, _ := msgBad.EncodeBytes()
+	var mgood bytes.Buffer
+	msgIDGood := MessageID{'1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'a', 's', 'd', 'f', 'g', 'h'}
+	msgGood := NewMessage(msgIDGood, []byte("good"))
+	msgGood.WriteTo(&mgood)
+	msgBytesGood := mgood.Bytes()
+
+	var mbad bytes.Buffer
+	msgIDBad := MessageID{'z', 'x', 'c', 'v', 'b', '6', '7', '8', '9', '0', 'a', 's', 'd', 'f', 'g', 'h'}
+	msgBad := NewMessage(msgIDBad, []byte("bad"))
+	msgBad.WriteTo(&mbad)
+	msgBytesBad := mbad.Bytes()
 
 	script := []instruction{
 		// SUB
@@ -210,13 +216,15 @@ func TestReaderBackoff(t *testing.T) {
 	}
 	n := newMockNSQD(script)
 
-	topicName := "test_reader_commands" + strconv.Itoa(int(time.Now().Unix()))
-	q, _ := NewReader(topicName, "ch")
-	q.VerboseLogging = true
-	q.BackoffMultiplier = 10 * time.Millisecond
-	q.SetMaxInFlight(5)
-	q.AddHandler(&testHandler{})
-	err := q.ConnectToNSQ(n.tcpAddr.String())
+	topicName := "test_consumer_commands" + strconv.Itoa(int(time.Now().Unix()))
+	config := NewConfig()
+	config.Set("verbose", true)
+	config.Set("max_in_flight", 5)
+	config.Set("backoff_multiplier", 10*time.Millisecond)
+	q, _ := NewConsumer(topicName, "ch", config)
+	q.SetLogger(logger, LogLevelDebug)
+	q.SetHandler(&testHandler{})
+	err := q.ConnectToNSQD(n.tcpAddr.String())
 	if err != nil {
 		t.Fatalf(err.Error())
 	}
@@ -231,24 +239,24 @@ func TestReaderBackoff(t *testing.T) {
 		"IDENTIFY",
 		"SUB " + topicName + " ch",
 		"RDY 5",
-		fmt.Sprintf("FIN %s", msgIdGood),
-		fmt.Sprintf("FIN %s", msgIdGood),
-		fmt.Sprintf("FIN %s", msgIdGood),
+		fmt.Sprintf("FIN %s", msgIDGood),
+		fmt.Sprintf("FIN %s", msgIDGood),
+		fmt.Sprintf("FIN %s", msgIDGood),
 		"RDY 5",
-		fmt.Sprintf("REQ %s 0", msgIdBad),
+		fmt.Sprintf("REQ %s 0", msgIDBad),
 		"RDY 0",
 		"RDY 1",
-		fmt.Sprintf("REQ %s 0", msgIdBad),
+		fmt.Sprintf("REQ %s 0", msgIDBad),
 		"RDY 0",
 		"RDY 1",
-		fmt.Sprintf("FIN %s", msgIdGood),
+		fmt.Sprintf("FIN %s", msgIDGood),
 		"RDY 0",
 		"RDY 1",
-		fmt.Sprintf("FIN %s", msgIdGood),
+		fmt.Sprintf("FIN %s", msgIDGood),
 		"RDY 5",
 	}
 	if len(n.got) != len(expected) {
-		t.Fatalf("we got %d commands > %d expected", len(n.got), len(expected))
+		t.Fatalf("we got %d commands != %d expected", len(n.got), len(expected))
 	}
 	for i, r := range n.got {
 		if string(r) != expected[i] {

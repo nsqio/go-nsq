@@ -18,6 +18,6 @@ func BenchmarkCommand(b *testing.B) {
 	b.StartTimer()
 
 	for i := 0; i < b.N; i++ {
-		cmd.Write(&buf)
+		cmd.WriteTo(&buf)
 	}
 }
