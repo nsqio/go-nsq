@@ -56,6 +56,8 @@ type Config struct {
 	maxInFlightMutex sync.RWMutex
 
 	maxBackoffDuration time.Duration `opt:"max_backoff_duration" min:"0" max:"60m"`
+
+	authSecret string `opt:"auth_secret"`
 }
 
 // NewConfig returns a new default configuration
@@ -162,6 +164,8 @@ func NewConfig() *Config {
 //
 // 	max_backoff_duration: the maximum amount of time to backoff when processing fails
 // 	                      0 == no backoff
+//
+// 	auth_secret: Secret for nsqd authentication. (requires nsqd 1.0+)
 //
 func (c *Config) Set(option string, value interface{}) error {
 	c.Lock()
