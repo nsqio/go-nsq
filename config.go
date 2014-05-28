@@ -183,27 +183,28 @@ func (c *Config) Set(option string, value interface{}) error {
 		dest := unsafeValueOf(fieldVal)
 		coercedVal, err := coerce(value, field.Type)
 		if err != nil {
-			log.Fatalf("ERROR: failed to coerce option %s (%v) - %s",
+			return fmt.Errorf("failed to coerce option %s (%v) - %s",
 				option, value, err)
 		}
 		if min != "" {
 			coercedMinVal, _ := coerce(min, field.Type)
 			if valueCompare(coercedVal, coercedMinVal) == -1 {
-				return errors.New(fmt.Sprintf("invalid %s ! %v < %v",
-					option, coercedVal.Interface(), coercedMinVal.Interface()))
+				return fmt.Errorf("invalid %s ! %v < %v",
+					option, coercedVal.Interface(), coercedMinVal.Interface())
 			}
 		}
 		if max != "" {
 			coercedMaxVal, _ := coerce(max, field.Type)
 			if valueCompare(coercedVal, coercedMaxVal) == 1 {
-				return errors.New(fmt.Sprintf("invalid %s ! %v > %v",
-					option, coercedVal.Interface(), coercedMaxVal.Interface()))
+				return fmt.Errorf("invalid %s ! %v > %v",
+					option, coercedVal.Interface(), coercedMaxVal.Interface())
 			}
 		}
 		dest.Set(coercedVal)
+		return nil
 	}
 
-	return errors.New(fmt.Sprintf("ERROR: invalid option %s", option))
+	return fmt.Errorf("invalid option %s", option)
 }
 
 // because Config contains private structs we can't use reflect.Value
