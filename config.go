@@ -32,7 +32,7 @@ type Config struct {
 	defaultRequeueDelay time.Duration `opt:"default_requeue_delay" min:"0" max:"60m"`
 	backoffMultiplier   time.Duration `opt:"backoff_multiplier" min:"0" max:"60m"`
 
-	maxAttempts       uint16        `opt:"max_attempts" min:"1" max:"65535"`
+	maxAttempts       uint16        `opt:"max_attempts" min:"0" max:"65535"`
 	lowRdyIdleTimeout time.Duration `opt:"low_rdy_idle_timeout" min:"1s" max:"5m"`
 
 	clientID  string `opt:"client_id"`
@@ -216,10 +216,17 @@ func unsafeValueOf(val reflect.Value) reflect.Value {
 
 func valueCompare(v1 reflect.Value, v2 reflect.Value) int {
 	switch v1.Type().String() {
-	case "int", "uint", "int16", "uint16", "int32", "uint32", "int64", "uint64":
+	case "int", "int16", "int32", "int64":
 		if v1.Int() > v2.Int() {
 			return 1
 		} else if v1.Int() < v2.Int() {
+			return -1
+		}
+		return 0
+	case "uint", "uint16", "uint32", "uint64":
+		if v1.Uint() > v2.Uint() {
+			return 1
+		} else if v1.Uint() < v2.Uint() {
 			return -1
 		}
 		return 0
@@ -249,8 +256,10 @@ func coerce(v interface{}, typ reflect.Type) (reflect.Value, error) {
 	switch typ.String() {
 	case "string":
 		v, err = coerceString(v)
-	case "int", "uint", "int16", "uint16", "int32", "uint32", "int64", "uint64":
+	case "int", "int16", "int32", "int64":
 		v, err = coerceInt64(v)
+	case "uint", "uint16", "uint32", "uint64":
+		v, err = coerceUint64(v)
 	case "float32", "float64":
 		v, err = coerceFloat64(v)
 	case "bool":
@@ -271,8 +280,10 @@ func valueTypeCoerce(v interface{}, typ reflect.Type) reflect.Value {
 	}
 	tval := reflect.New(typ).Elem()
 	switch typ.String() {
-	case "int", "uint", "int16", "uint16", "int32", "uint32", "int64", "uint64":
+	case "int", "int16", "int32", "int64":
 		tval.SetInt(val.Int())
+	case "uint", "uint16", "uint32", "uint64":
+		tval.SetUint(val.Uint())
 	case "float32", "float64":
 		tval.SetFloat(val.Float())
 	}
@@ -336,6 +347,16 @@ func coerceInt64(v interface{}) (int64, error) {
 		return strconv.ParseInt(v.(string), 10, 64)
 	case int, int16, uint16, int32, uint32, int64, uint64:
 		return reflect.ValueOf(v).Int(), nil
+	}
+	return 0, errors.New("invalid value type")
+}
+
+func coerceUint64(v interface{}) (uint64, error) {
+	switch v.(type) {
+	case string:
+		return strconv.ParseUint(v.(string), 10, 64)
+	case int, int16, uint16, int32, uint32, int64, uint64:
+		return reflect.ValueOf(v).Uint(), nil
 	}
 	return 0, errors.New("invalid value type")
 }
