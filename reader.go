@@ -16,6 +16,9 @@ import (
 	"time"
 )
 
+// Use a private rng so as not to mess with client application's seeds
+var rng = rand.New(rand.NewSource(time.Now().UnixNano()))
+
 // Handler is the synchronous interface to Reader.
 //
 // Implement this interface for handlers that return whether or not message
@@ -203,7 +206,6 @@ func (q *Reader) conns() []*Conn {
 	return conns
 }
 
-
 // ConnectionMaxInFlight calculates the per-connection max-in-flight count.
 //
 // This may change dynamically based on the number of connections to nsqd the Reader
@@ -300,9 +302,8 @@ func (q *Reader) ConnectToLookupd(addr string) error {
 func (q *Reader) lookupdLoop() {
 	// add some jitter so that multiple consumers discovering the same topic,
 	// when restarted at the same time, dont all connect at once.
-	rand.Seed(time.Now().UnixNano())
 
-	jitter := time.Duration(int64(rand.Float64() * q.LookupdPollJitter * float64(q.LookupdPollInterval)))
+	jitter := time.Duration(int64(rng.Float64() * q.LookupdPollJitter * float64(q.LookupdPollInterval)))
 	ticker := time.NewTicker(q.LookupdPollInterval)
 
 	select {
@@ -670,7 +671,7 @@ func (q *Reader) rdyLoop() {
 			if len(q.connections) == 0 {
 				continue
 			}
-			idx := rand.Intn(len(q.connections))
+			idx := rng.Intn(len(q.connections))
 			for _, c := range q.connections {
 				if i == idx {
 					choice = c
@@ -883,7 +884,7 @@ func (q *Reader) redistributeRDY() {
 
 	for len(possibleConns) > 0 && availableMaxInFlight > 0 {
 		availableMaxInFlight--
-		i := rand.Int() % len(possibleConns)
+		i := rng.Int() % len(possibleConns)
 		c := possibleConns[i]
 		// delete
 		possibleConns = append(possibleConns[:i], possibleConns[i+1:]...)
