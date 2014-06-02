@@ -15,6 +15,9 @@ import (
 	"time"
 )
 
+// Use a private rng so as not to mess with client application's seeds
+var rng = rand.New(rand.NewSource(time.Now().UnixNano()))
+
 // Handler is the message processing interface for Consumer
 //
 // Implement this interface for handlers that return whether or not message
@@ -220,9 +223,7 @@ func (r *Consumer) ConnectToNSQLookupd(addr string) error {
 func (r *Consumer) lookupdLoop() {
 	// add some jitter so that multiple consumers discovering the same topic,
 	// when restarted at the same time, dont all connect at once.
-	rand.Seed(time.Now().UnixNano())
-
-	jitter := time.Duration(int64(rand.Float64() *
+	jitter := time.Duration(int64(rng.Float64() *
 		r.config.lookupdPollJitter * float64(r.config.lookupdPollInterval)))
 	ticker := time.NewTicker(r.config.lookupdPollInterval)
 
@@ -529,7 +530,7 @@ func (r *Consumer) rdyLoop() {
 			if len(conns) == 0 {
 				continue
 			}
-			idx := rand.Intn(len(conns))
+			idx := rng.Intn(len(conns))
 			for _, c := range conns {
 				if i == idx {
 					choice = c
@@ -732,7 +733,7 @@ func (r *Consumer) redistributeRDY() {
 
 	for len(possibleConns) > 0 && availableMaxInFlight > 0 {
 		availableMaxInFlight--
-		i := rand.Int() % len(possibleConns)
+		i := rng.Int() % len(possibleConns)
 		c := possibleConns[i]
 		// delete
 		possibleConns = append(possibleConns[:i], possibleConns[i+1:]...)
