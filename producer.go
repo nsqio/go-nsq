@@ -33,9 +33,9 @@ type Producer struct {
 	state           int32
 
 	concurrentProducers int32
-	stopFlag          int32
-	exitChan          chan int
-	wg                sync.WaitGroup
+	stopFlag            int32
+	exitChan            chan int
+	wg                  sync.WaitGroup
 }
 
 // ProducerTransaction is returned by the async publish methods

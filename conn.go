@@ -22,10 +22,19 @@ import (
 // IdentifyResponse represents the metadata
 // returned from an IDENTIFY command to nsqd
 type IdentifyResponse struct {
-	MaxRdyCount int64 `json:"max_rdy_count"`
-	TLSv1       bool  `json:"tls_v1"`
-	Deflate     bool  `json:"deflate"`
-	Snappy      bool  `json:"snappy"`
+	MaxRdyCount  int64 `json:"max_rdy_count"`
+	TLSv1        bool  `json:"tls_v1"`
+	Deflate      bool  `json:"deflate"`
+	Snappy       bool  `json:"snappy"`
+	AuthRequired bool  `json:"auth_required"`
+}
+
+// AuthResponse represents the metadata
+// returned from an AUTH command to nsqd
+type AuthResponse struct {
+	Identity        string `json:"identity"`
+	IdentityUrl     string `json:"identity_url"`
+	PermissionCount int64  `json:"permission_count"`
 }
 
 type msgResponse struct {
@@ -131,6 +140,18 @@ func (c *Conn) Connect() (*IdentifyResponse, error) {
 	resp, err := c.identify()
 	if err != nil {
 		return nil, err
+	}
+
+	if resp != nil && resp.AuthRequired {
+		if c.config.authSecret == "" {
+			c.log(LogLevelError, "Auth Required")
+			return nil, errors.New("Auth Required")
+		}
+		err := c.auth(c.config.authSecret)
+		if err != nil {
+			c.log(LogLevelError, "Auth Failed %s", err)
+			return nil, err
+		}
 	}
 
 	c.wg.Add(2)
@@ -373,6 +394,37 @@ func (c *Conn) upgradeSnappy() error {
 	if frameType != FrameTypeResponse || !bytes.Equal(data, []byte("OK")) {
 		return errors.New("invalid response from Snappy upgrade")
 	}
+	return nil
+}
+
+func (c *Conn) auth(secret string) error {
+	cmd, err := Auth(secret)
+	if err != nil {
+		return err
+	}
+
+	err = c.WriteCommand(cmd)
+	if err != nil {
+		return err
+	}
+
+	frameType, data, err := ReadUnpackedResponse(c)
+	if err != nil {
+		return err
+	}
+
+	if frameType == FrameTypeError {
+		return errors.New("Error authenticating " + string(data))
+	}
+
+	resp := &AuthResponse{}
+	err = json.Unmarshal(data, resp)
+	if err != nil {
+		return err
+	}
+
+	c.log(LogLevelInfo, "Auth accepted. Identity: %q %s Permissions: %d", resp.Identity, resp.IdentityUrl, resp.PermissionCount)
+
 	return nil
 }
 

@@ -96,6 +96,13 @@ func Identify(js map[string]interface{}) (*Command, error) {
 	return &Command{[]byte("IDENTIFY"), nil, body}, nil
 }
 
+// Auth sends credentials for authentication
+//
+// After `Identify`, this is usually the first message sent, if auth is used.
+func Auth(secret string) (*Command, error) {
+	return &Command{[]byte("AUTH"), nil, []byte(secret)}, nil
+}
+
 // Register creates a new Command to add a topic/channel for the connected nsqd
 func Register(topic string, channel string) *Command {
 	params := [][]byte{[]byte(topic)}
