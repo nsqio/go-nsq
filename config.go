@@ -298,7 +298,7 @@ func coerceString(v interface{}) (string, error) {
 	switch v.(type) {
 	case string:
 		return v.(string), nil
-	case int, int16, uint16, int32, uint32, int64, uint64:
+	case int, int16, int32, int64, uint, uint16, uint32, uint64:
 		return fmt.Sprintf("%d", v), nil
 	case float64:
 		return fmt.Sprintf("%f", v), nil
@@ -312,9 +312,12 @@ func coerceDuration(v interface{}) (time.Duration, error) {
 	switch v.(type) {
 	case string:
 		return time.ParseDuration(v.(string))
-	case int, int16, uint16, int32, uint32, int64, uint64:
+	case int, int16, int32, int64:
 		// treat like ms
 		return time.Duration(reflect.ValueOf(v).Int()) * time.Millisecond, nil
+	case uint, uint16, uint32, uint64:
+		// treat like ms
+		return time.Duration(reflect.ValueOf(v).Uint()) * time.Millisecond, nil
 	case time.Duration:
 		return v.(time.Duration), nil
 	}
@@ -327,8 +330,10 @@ func coerceBool(v interface{}) (bool, error) {
 		return v.(bool), nil
 	case string:
 		return strconv.ParseBool(v.(string))
-	case int, int16, uint16, int32, uint32, int64, uint64:
+	case int, int16, int32, int64:
 		return reflect.ValueOf(v).Int() != 0, nil
+	case uint, uint16, uint32, uint64:
+		return reflect.ValueOf(v).Uint() != 0, nil
 	}
 	return false, errors.New("invalid value type")
 }
@@ -337,8 +342,10 @@ func coerceFloat64(v interface{}) (float64, error) {
 	switch v.(type) {
 	case string:
 		return strconv.ParseFloat(v.(string), 64)
-	case int, int16, uint16, int32, uint32, int64, uint64:
+	case int, int16, int32, int64:
 		return float64(reflect.ValueOf(v).Int()), nil
+	case uint, uint16, uint32, uint64:
+		return float64(reflect.ValueOf(v).Uint()), nil
 	case float64:
 		return v.(float64), nil
 	}
@@ -349,8 +356,10 @@ func coerceInt64(v interface{}) (int64, error) {
 	switch v.(type) {
 	case string:
 		return strconv.ParseInt(v.(string), 10, 64)
-	case int, int16, uint16, int32, uint32, int64, uint64:
+	case int, int16, int32, int64:
 		return reflect.ValueOf(v).Int(), nil
+	case uint, uint16, uint32, uint64:
+		return int64(reflect.ValueOf(v).Uint()), nil
 	}
 	return 0, errors.New("invalid value type")
 }
@@ -359,7 +368,9 @@ func coerceUint64(v interface{}) (uint64, error) {
 	switch v.(type) {
 	case string:
 		return strconv.ParseUint(v.(string), 10, 64)
-	case int, int16, uint16, int32, uint32, int64, uint64:
+	case int, int16, int32, int64:
+		return uint64(reflect.ValueOf(v).Int()), nil
+	case uint, uint16, uint32, uint64:
 		return reflect.ValueOf(v).Uint(), nil
 	}
 	return 0, errors.New("invalid value type")
