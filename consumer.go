@@ -112,6 +112,8 @@ type Consumer struct {
 // The returned Consumer instance is setup with sane default values.  To modify
 // configuration, update the values on the returned instance before connecting.
 func NewConsumer(topic string, channel string, config *Config) (*Consumer, error) {
+	config.initialize()
+
 	if !IsValidTopicName(topic) {
 		return nil, errors.New("invalid topic name")
 	}
