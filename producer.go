@@ -56,6 +56,7 @@ func (t *ProducerTransaction) finish() {
 
 // NewProducer returns an instance of Producer for the specified address
 func NewProducer(addr string, config *Config) *Producer {
+	config.initialize()
 	return &Producer{
 		id: atomic.AddInt64(&instCount, 1),
 

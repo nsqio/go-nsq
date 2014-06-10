@@ -90,6 +90,7 @@ type Conn struct {
 
 // NewConn returns a new Conn instance
 func NewConn(addr string, config *Config) *Conn {
+	config.initialize()
 	return &Conn{
 		addr: addr,
 
