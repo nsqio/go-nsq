@@ -58,7 +58,7 @@ type Conn struct {
 
 	mtx sync.Mutex
 
-	config *Config
+	config *config
 
 	conn    *net.TCPConn
 	tlsConn *tls.Conn
@@ -89,12 +89,11 @@ type Conn struct {
 }
 
 // NewConn returns a new Conn instance
-func NewConn(addr string, config *Config) *Conn {
-	config.initialize()
+func NewConn(addr string, cfg Config) *Conn {
 	return &Conn{
 		addr: addr,
 
-		config: config,
+		config: cfg.(*config),
 
 		maxRdyCount:      2500,
 		lastMsgTimestamp: time.Now().UnixNano(),

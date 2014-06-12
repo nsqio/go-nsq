@@ -17,7 +17,7 @@ type Producer struct {
 	id     int64
 	addr   string
 	conn   *Conn
-	config *Config
+	config *config
 
 	logger *log.Logger
 	logLvl LogLevel
@@ -55,13 +55,12 @@ func (t *ProducerTransaction) finish() {
 }
 
 // NewProducer returns an instance of Producer for the specified address
-func NewProducer(addr string, config *Config) *Producer {
-	config.initialize()
+func NewProducer(addr string, cfg Config) *Producer {
 	return &Producer{
 		id: atomic.AddInt64(&instCount, 1),
 
 		addr:   addr,
-		config: config,
+		config: cfg.(*config),
 
 		transactionChan: make(chan *ProducerTransaction),
 		exitChan:        make(chan int),
