@@ -19,10 +19,6 @@ var ErrAlreadyConnected = errors.New("already connected")
 // ErrOverMaxInFlight is returned from Consumer if over max-in-flight
 var ErrOverMaxInFlight = errors.New("over configure max-inflight")
 
-// ErrLookupdAddressExists is returned from ConnectToNSQLookupd
-// when given lookupd address exists already
-var ErrLookupdAddressExists = errors.New("lookupd address already exists")
-
 // ErrIdentify is returned from Conn as part of the IDENTIFY handshake
 type ErrIdentify struct {
 	Reason string
