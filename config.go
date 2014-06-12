@@ -14,89 +14,8 @@ import (
 	"unsafe"
 )
 
-// Config is a struct of NSQ options
+// Config is a type for specifying NSQ options
 //
-// (see Config.Set() for available parameters)
-type Config struct {
-	sync.RWMutex
-	initOnce sync.Once
-
-	verbose bool `opt:"verbose"`
-
-	readTimeout  time.Duration `opt:"read_timeout" min:"100ms" max:"5m"`
-	writeTimeout time.Duration `opt:"write_timeout" min:"100ms" max:"5m"`
-
-	lookupdPollInterval time.Duration `opt:"lookupd_poll_interval" min:"5s" max:"5m"`
-	lookupdPollJitter   float64       `opt:"lookupd_poll_jitter" min:"0" max:"1"`
-
-	maxRequeueDelay     time.Duration `opt:"max_requeue_delay" min:"0" max:"60m"`
-	defaultRequeueDelay time.Duration `opt:"default_requeue_delay" min:"0" max:"60m"`
-	backoffMultiplier   time.Duration `opt:"backoff_multiplier" min:"0" max:"60m"`
-
-	maxAttempts       uint16        `opt:"max_attempts" min:"0" max:"65535"`
-	lowRdyIdleTimeout time.Duration `opt:"low_rdy_idle_timeout" min:"1s" max:"5m"`
-
-	clientID  string `opt:"client_id"`
-	hostname  string `opt:"hostname"`
-	userAgent string `opt:"user_agent"`
-
-	heartbeatInterval time.Duration `opt:"heartbeat_interval"`
-	sampleRate        int32         `opt:"sample_rate" min:"0" max:"99"`
-
-	tlsV1     bool        `opt:"tls_v1"`
-	tlsConfig *tls.Config `opt:"tls_config"`
-
-	deflate      bool `opt:"deflate"`
-	deflateLevel int  `opt:"deflate_level" min:"1" max:"9"`
-	snappy       bool `opt:"snappy"`
-
-	outputBufferSize    int64         `opt:"output_buffer_size"`
-	outputBufferTimeout time.Duration `opt:"output_buffer_timeout"`
-
-	maxInFlight      int `opt:"max_in_flight" min:"0"`
-	maxInFlightMutex sync.RWMutex
-
-	maxBackoffDuration time.Duration `opt:"max_backoff_duration" min:"0" max:"60m"`
-
-	authSecret string `opt:"auth_secret"`
-}
-
-// NewConfig returns a new default configuration
-func NewConfig() *Config {
-	conf := &Config{}
-	conf.initialize()
-	return conf
-}
-
-// initialize is used to ensure that a Config has a baseline set of defaults
-// despite how it might have been insantiated
-func (c *Config) initialize() {
-	c.initOnce.Do(func() {
-		hostname, err := os.Hostname()
-		if err != nil {
-			log.Fatalf("ERROR: unable to get hostname %s", err.Error())
-		}
-		c.maxInFlight = 1
-		c.maxAttempts = 5
-		c.lookupdPollInterval = 60 * time.Second
-		c.lookupdPollJitter = 0.3
-		c.lowRdyIdleTimeout = 10 * time.Second
-		c.defaultRequeueDelay = 90 * time.Second
-		c.maxRequeueDelay = 15 * time.Minute
-		c.backoffMultiplier = time.Second
-		c.maxBackoffDuration = 120 * time.Second
-		c.readTimeout = DefaultClientTimeout
-		c.writeTimeout = time.Second
-		c.deflateLevel = 6
-		c.outputBufferSize = 16 * 1024
-		c.outputBufferTimeout = 250 * time.Millisecond
-		c.heartbeatInterval = DefaultClientTimeout / 2
-		c.clientID = strings.Split(hostname, ".")[0]
-		c.hostname = hostname
-		c.userAgent = fmt.Sprintf("go-nsq/%s", VERSION)
-	})
-}
-
 // Set takes an option as a string and a value as an interface and
 // attempts to set the appropriate configuration option.
 //
@@ -167,11 +86,96 @@ func (c *Config) initialize() {
 //
 // 	auth_secret: Secret for nsqd authentication. (requires nsqd 1.0+)
 //
-func (c *Config) Set(option string, value interface{}) error {
+type Config interface {
+	Set(string, interface{}) error
+	sentinel()
+}
+
+type config struct {
+	sync.RWMutex
+	initOnce sync.Once
+
+	verbose bool `opt:"verbose"`
+
+	readTimeout  time.Duration `opt:"read_timeout" min:"100ms" max:"5m"`
+	writeTimeout time.Duration `opt:"write_timeout" min:"100ms" max:"5m"`
+
+	lookupdPollInterval time.Duration `opt:"lookupd_poll_interval" min:"5s" max:"5m"`
+	lookupdPollJitter   float64       `opt:"lookupd_poll_jitter" min:"0" max:"1"`
+
+	maxRequeueDelay     time.Duration `opt:"max_requeue_delay" min:"0" max:"60m"`
+	defaultRequeueDelay time.Duration `opt:"default_requeue_delay" min:"0" max:"60m"`
+	backoffMultiplier   time.Duration `opt:"backoff_multiplier" min:"0" max:"60m"`
+
+	maxAttempts       uint16        `opt:"max_attempts" min:"0" max:"65535"`
+	lowRdyIdleTimeout time.Duration `opt:"low_rdy_idle_timeout" min:"1s" max:"5m"`
+
+	clientID  string `opt:"client_id"`
+	hostname  string `opt:"hostname"`
+	userAgent string `opt:"user_agent"`
+
+	heartbeatInterval time.Duration `opt:"heartbeat_interval"`
+	sampleRate        int32         `opt:"sample_rate" min:"0" max:"99"`
+
+	tlsV1     bool        `opt:"tls_v1"`
+	tlsConfig *tls.Config `opt:"tls_config"`
+
+	deflate      bool `opt:"deflate"`
+	deflateLevel int  `opt:"deflate_level" min:"1" max:"9"`
+	snappy       bool `opt:"snappy"`
+
+	outputBufferSize    int64         `opt:"output_buffer_size"`
+	outputBufferTimeout time.Duration `opt:"output_buffer_timeout"`
+
+	maxInFlight      int `opt:"max_in_flight" min:"0"`
+	maxInFlightMutex sync.RWMutex
+
+	maxBackoffDuration time.Duration `opt:"max_backoff_duration" min:"0" max:"60m"`
+
+	authSecret string `opt:"auth_secret"`
+}
+
+// NewConfig returns a new default configuration
+func NewConfig() Config {
+	hostname, err := os.Hostname()
+	if err != nil {
+		log.Fatalf("ERROR: unable to get hostname %s", err.Error())
+	}
+	return &config{
+		maxInFlight: 1,
+		maxAttempts: 5,
+
+		lookupdPollInterval: 60 * time.Second,
+		lookupdPollJitter:   0.3,
+
+		lowRdyIdleTimeout: 10 * time.Second,
+
+		defaultRequeueDelay: 90 * time.Second,
+		maxRequeueDelay:     15 * time.Minute,
+		backoffMultiplier:   time.Second,
+		maxBackoffDuration:  120 * time.Second,
+
+		readTimeout:  DefaultClientTimeout,
+		writeTimeout: time.Second,
+
+		deflateLevel: 6,
+
+		outputBufferSize:    16 * 1024,
+		outputBufferTimeout: 250 * time.Millisecond,
+
+		heartbeatInterval: DefaultClientTimeout / 2,
+
+		clientID:  strings.Split(hostname, ".")[0],
+		hostname:  hostname,
+		userAgent: fmt.Sprintf("go-nsq/%s", VERSION),
+	}
+}
+
+func (c *config) sentinel() {}
+
+func (c *config) Set(option string, value interface{}) error {
 	c.Lock()
 	defer c.Unlock()
-
-	c.initialize()
 
 	val := reflect.ValueOf(c).Elem()
 	typ := val.Type()

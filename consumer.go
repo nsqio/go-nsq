@@ -77,7 +77,7 @@ type Consumer struct {
 	id      int64
 	topic   string
 	channel string
-	config  *Config
+	config  *config
 
 	backoffChan          chan bool
 	rdyChan              chan *Conn
@@ -111,9 +111,7 @@ type Consumer struct {
 //
 // The returned Consumer instance is setup with sane default values.  To modify
 // configuration, update the values on the returned instance before connecting.
-func NewConsumer(topic string, channel string, config *Config) (*Consumer, error) {
-	config.initialize()
-
+func NewConsumer(topic string, channel string, cfg Config) (*Consumer, error) {
 	if !IsValidTopicName(topic) {
 		return nil, errors.New("invalid topic name")
 	}
@@ -127,7 +125,7 @@ func NewConsumer(topic string, channel string, config *Config) (*Consumer, error
 
 		topic:   topic,
 		channel: channel,
-		config:  config,
+		config:  cfg.(*config),
 
 		incomingMessages: make(chan *Message),
 
