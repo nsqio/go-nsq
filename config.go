@@ -61,7 +61,14 @@ type Config struct {
 	authSecret string `opt:"auth_secret"`
 }
 
-// NewConfig returns a new default configuration:
+// NewConfig returns a new default configuration.
+// Calls to "set" that take a time duration as an
+// argument can be input as follows:
+// 	"1000ms" OR "1s" OR 1000 OR 1000*time.Millisecond (e.g. a string parsed by time.ParseDuration(), an integer interpreted as milliseconds, or a literal time.Duration value.)
+//
+// Calls to "set" that take booleans can be input as:
+// 	"true" OR true OR 1 (e.g. a string parsed by strconv.ParseBool(), a boolean, or an integer, where 0 is false and !=0 is true.) 
+//
 // "verbose" : false
 // "read_timeout" : 60s
 // "write_timeout" : 1 second (min: 100ms, max: 5m)
