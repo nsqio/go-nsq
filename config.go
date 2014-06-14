@@ -61,7 +61,35 @@ type Config struct {
 	authSecret string `opt:"auth_secret"`
 }
 
-// NewConfig returns a new default configuration
+// NewConfig returns a new default configuration.
+//
+// 	"verbose":                false (bool)
+// 	"read_timeout":           60s (min: 100ms, max: 5m) (time.Duration)
+// 	"write_timeout":          1s (min: 100ms, max: 5m) (time.Duration)
+// 	"lookupd_poll_interval":  60s (min: 5s, max: 5m) (time.Duration)
+// 	"lookupd_poll_jitter":    0.3 (min: 0.0, max: 1.0) (float)
+// 	"max_requeue_delay":      15m (min: 0, max: 60m) (time.Duration)
+// 	"default_requeue_delay":  90s (min: 0, max: 60m) (time.Duration)
+// 	"backoff_multiplier":     1s (min: 0, max: 60m) (time.TIme)
+// 	"max_attempts":           5 (min: 0, max: 65535) (int)
+// 	"low_rdy_idle_timeout":   10s (min: 1s, max: 5m) (time.Duration)
+// 	"client_id":              "<short host name>" (string)
+// 	"hostname":               os.Hostname() (string)
+// 	"user_agent":             "go-nsq/<version>" (string)
+// 	"heartbeat_interval":     30s (time.Duration)
+// 	"sample_rate":            0 (min: 0, max: 99) (int)
+// 	"tls_v1":                 false (bool)
+// 	"tls_config":             nil (*tls.Config)
+// 	"deflate":                false (bool)
+// 	"deflate_level":          6 (min: 1, max: 9) (int)
+// 	"snappy":                 false (bool)
+// 	"output_buffer_size":     16384 (int)
+// 	"output_buffer_timeout":  250ms (time.Duration)
+// 	"max_in_flight":          1 (int)
+// 	"max_backoff_duration":   120s (time.Duration)
+// 	"auth_secret":            "" (string)
+//
+// See Config.Set() for a description of these parameters.
 func NewConfig() *Config {
 	conf := &Config{}
 	conf.initialize()
@@ -103,69 +131,95 @@ func (c *Config) initialize() {
 // It attempts to coerce the value into the right format depending on the named
 // option and the underlying type of the value passed in.
 //
+// Calls to Set() that take a time.Duration as an argument can be input as:
+//
+// 	"1000ms" (a string parsed by time.ParseDuration())
+// 	1000 (an integer interpreted as milliseconds)
+// 	1000*time.Millisecond (a literal time.Duration value)
+//
+// Calls to Set() that take bool can be input as:
+//
+// 	"true" (a string parsed by strconv.ParseBool())
+// 	true (a boolean)
+// 	1 (an int where 1 == true and 0 == false)
+//
 // It returns an error for an invalid option or value.
 //
-// 	verbose: enable verbose logging
+// 	verbose (bool): enable verbose logging
 //
-// 	read_timeout: the deadline set for network reads
+// 	read_timeout (time.Duration): the deadline set for network reads
+// 	                              (min: 100ms, max: 5m)
 //
-// 	write_timeout: the deadline set for network writes
+// 	write_timeout (time.Duration): the deadline set for network writes
+// 	                               (min: 100ms, max: 5m)
 //
-// 	lookupd_poll_interval: duration between polling lookupd for new
+// 	lookupd_poll_interval (time.Duration): duration between polling lookupd for new
+// 	                                       (min: 5s, max: 5m)
 //
-// 	lookupd_poll_jitter: fractional amount of jitter to add to the lookupd pool loop,
-// 	                     this helps evenly distribute requests even if multiple
-// 	                     consumers restart at the same time.
+// 	lookupd_poll_jitter (float): fractional amount of jitter to add to the lookupd pool loop,
+// 	                             this helps evenly distribute requests even if multiple
+// 	                             consumers restart at the same time.
+// 	                             (min: 0.0, max: 1.0)
 //
-// 	max_requeue_delay: the maximum duration when REQueueing (for doubling of deferred requeue)
+// 	max_requeue_delay (time.Duration): the maximum duration when REQueueing
+// 	                                   (for doubling of deferred requeue)
+// 	                                   (min: 0, max: 60m)
 //
-// 	default_requeue_delay: the default duration when REQueueing
+// 	default_requeue_delay (time.Duration): the default duration when REQueueing
+// 	                                       (min: 0, max: 60m)
 //
-// 	backoff_multiplier: the unit of time for calculating consumer backoff
+// 	backoff_multiplier (time.Duration): the unit of time for calculating consumer backoff
+// 	                                    (min: 0, max: 60m)
 //
-// 	max_attempts: maximum number of times this consumer will attempt to process a message
+// 	max_attempts (int): maximum number of times this consumer will attempt to process a message
+// 	                    (min: 0, max: 65535)
 //
-// 	low_rdy_idle_timeout: the amount of time in seconds to wait for a message from a producer
-// 	                      when in a state where RDY counts are re-distributed
-// 	                      (ie. max_in_flight < num_producers)
+// 	low_rdy_idle_timeout (time.Duration): the amount of time in seconds to wait for a message
+// 	                                      from a producer when in a state where RDY counts
+// 	                                      are re-distributed (ie. max_in_flight < num_producers)
+// 	                                      (min: 1s, max: 5m)
 //
-// 	client_id: an identifier sent to nsqd representing the client (defaults: short hostname)
+// 	client_id (string): an identifier sent to nsqd representing the client
+//                      (defaults: short hostname)
 //
-// 	hostname: an identifier sent to nsqd representing the host (defaults: long hostname)
+// 	hostname (string): an identifier sent to nsqd representing the host
+// 	                   (defaults: long hostname)
 //
-// 	user_agent: a string identifying the agent for this client (in the spirit of HTTP)
-// 	            (default: "<client_library_name>/<version>")
+// 	user_agent (string): an identifier of the agent for this client (in the spirit of HTTP)
+// 	                     (default: "<client_library_name>/<version>")
 //
-// 	heartbeat_interval: duration of time between heartbeats
+// 	heartbeat_interval (time.Duration): duration of time between heartbeats
 //
-// 	sample_rate: integer percentage to sample the channel (requires nsqd 0.2.25+)
+// 	sample_rate (int): integer percentage to sample the channel (requires nsqd 0.2.25+)
+// 	                   (min: 0, max: 99)
 //
-// 	tls_v1: negotiate TLS
+// 	tls_v1 (bool): negotiate TLS
 //
-// 	tls_config: client TLS configuration
+// 	tls_config (*tls.Config): client TLS configuration
 //
-// 	deflate: negotiate Deflate compression
+// 	deflate (bool): negotiate Deflate compression
 //
-// 	deflate_level: the compression level to negotiate for Deflate
+// 	deflate_level (int): the compression level to negotiate for Deflate
+// 	                     (min: 1, max: 9)
 //
-// 	snappy: negotiate Snappy compression
+// 	snappy (bool): negotiate Snappy compression
 //
-// 	output_buffer_size: size of the buffer (in bytes) used by nsqd for
-// 	                    buffering writes to this connection
+// 	output_buffer_size (int): size of the buffer (in bytes) used by nsqd for
+// 	                          buffering writes to this connection
 //
-// 	output_buffer_timeout: timeout (in ms) used by nsqd before flushing buffered
-// 	                       writes (set to 0 to disable).
+// 	output_buffer_timeout (time.Duration): timeout (in ms) used by nsqd before flushing buffered
+// 	                                       writes (set to 0 to disable).
+// 	
+// 	                                       WARNING: configuring clients with an extremely low
+// 	                                       (< 25ms) output_buffer_timeout has a significant effect
+// 	                                       on nsqd CPU usage (particularly with > 50 clients connected).
 //
-// 	                       WARNING: configuring clients with an extremely low
-// 	                       (< 25ms) output_buffer_timeout has a significant effect
-// 	                       on nsqd CPU usage (particularly with > 50 clients connected).
+// 	max_in_flight (int): the maximum number of messages to allow in flight (concurrency knob)
 //
-// 	max_in_flight: the maximum number of messages to allow in flight (concurrency knob)
+// 	max_backoff_duration (time.Duration): the maximum amount of time to backoff when processing fails
+// 	                                      0 == no backoff
 //
-// 	max_backoff_duration: the maximum amount of time to backoff when processing fails
-// 	                      0 == no backoff
-//
-// 	auth_secret: Secret for nsqd authentication. (requires nsqd 1.0+)
+// 	auth_secret (string): secret for nsqd authentication (requires nsqd 0.2.29+)
 //
 func (c *Config) Set(option string, value interface{}) error {
 	c.Lock()
