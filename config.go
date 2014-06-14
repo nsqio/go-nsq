@@ -53,8 +53,7 @@ type Config struct {
 	outputBufferSize    int64         `opt:"output_buffer_size"`
 	outputBufferTimeout time.Duration `opt:"output_buffer_timeout"`
 
-	maxInFlight      int `opt:"max_in_flight" min:"0"`
-	maxInFlightMutex sync.RWMutex
+	maxInFlight int `opt:"max_in_flight" min:"0"`
 
 	maxBackoffDuration time.Duration `opt:"max_backoff_duration" min:"0" max:"60m"`
 

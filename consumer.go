@@ -194,6 +194,24 @@ func (r *Consumer) maxInFlight() int {
 	return mif
 }
 
+// SetMaxInFlight sets the maximum number of messages this comsumer instance
+// will allow in-flight.
+//
+// If already connected, it updates the reader RDY state for each connection.
+func (r *Consumer) SetMaxInFlight(maxInFlight int) {
+	r.config.RLock()
+	mif := r.config.maxInFlight
+	r.config.RUnlock()
+	if mif == maxInFlight {
+		return
+	}
+	r.config.Set("max_in_flight", maxInFlight)
+
+	for _, c := range r.conns() {
+		r.rdyChan <- c
+	}
+}
+
 // ConnectToNSQLookupd adds an nsqlookupd address to the list for this Consumer instance.
 //
 // If it is the first to be added, it initiates an HTTP request to discover nsqd
