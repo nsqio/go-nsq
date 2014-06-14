@@ -61,7 +61,41 @@ type Config struct {
 	authSecret string `opt:"auth_secret"`
 }
 
-// NewConfig returns a new default configuration
+// NewConfig returns a new default configuration.
+// Calls to "set" that take a time duration as an
+// argument can be input as follows:
+// 	"1000ms" OR "1s" OR 1000 OR 1000*time.Millisecond (e.g. a string parsed by time.ParseDuration(), an integer interpreted as milliseconds, or a literal time.Duration value.)
+//
+// Calls to "set" that take booleans can be input as:
+// 	"true" OR true OR 1 (e.g. a string parsed by strconv.ParseBool(), a boolean, or an integer, where 0 is false and !=0 is true.) 
+//
+// "verbose" : false
+// "read_timeout" : 60s
+// "write_timeout" : 1 second (min: 100ms, max: 5m)
+// "lookupd_poll_interval" : 60 seconds (min: 5s, max: 5m)
+// "lookupd_poll_jitter" : 0.3 (min: 0.0, max: 1.0)
+// "max_requeue_delay" : 15 minutes (min: 0, max: 60m)
+// "default_requeue_delay" : 90 seconds (min: 0, max: 60m)
+// "backoff_multiplier" : 1 second (min: 0, max: 60m)
+// "max_attempts" : 5 (min: 0, max: 65535)
+// "low_rdy_idle_timeout" : 10 seconds (min: 1s, max: 5m)
+// "client_id" : strings.Split(hostname, ".")[0]
+// "hostname" : os.Hostname()
+// "user_agent" : "go-nsq/v2"
+// "heartbeat_interval" : 30s
+// "sample_rate" : 0 (min: 0, max: 99)
+// "tls_v1" : false
+// "tls_config" : nil
+// "deflate" : false
+// "deflate_level" : 6 (min: 1, max: 9)
+// "snappy" : false
+// "output_buffer_size" : 16384
+// "output_buffer_timeout" : 250ms
+// "max_in_flight" : 1
+// "max_backoff_duration" : 120 seconds 
+// "auth_secret" : ""
+//
+// See Set() for a description of these parameters.
 func NewConfig() *Config {
 	conf := &Config{}
 	conf.initialize()
