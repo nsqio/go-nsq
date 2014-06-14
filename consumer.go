@@ -225,6 +225,22 @@ func (r *Consumer) ConnectToNSQLookupd(addr string) error {
 	return nil
 }
 
+// ConnectToNSQLookupd adds multiple nsqlookupd address to the list for this Consumer instance.
+//
+// If adding the first address it initiates an HTTP request to discover nsqd
+// producers for the configured topic.
+//
+// A goroutine is spawned to handle continual polling.
+func (r *Consumer) ConnectToNSQLookupds(addresses []string) error {
+	for _, addr := range addresses {
+		err := r.ConnectToNSQLookupd(addr)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func validatedLookupAddr(addr string) error {
 	if strings.Contains(addr, "/") {
 		_, err := url.Parse(addr)
@@ -345,6 +361,20 @@ func (r *Consumer) queryLookupd() {
 			continue
 		}
 	}
+}
+
+// ConnectToNSQD takes multiple nsqd addresses to connect directly to.
+//
+// It is recommended to use ConnectToNSQLookupd so that topics are discovered
+// automatically.  This method is useful when you want to connect to local instance.
+func (r *Consumer) ConnectToNSQDs(addresses []string) error {
+	for _, addr := range addresses {
+		err := r.ConnectToNSQD(addr)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ConnectToNSQD takes a nsqd address to connect directly to.
