@@ -237,7 +237,6 @@ func TestProducerHeartbeat(t *testing.T) {
 
 func readMessages(topicName string, t *testing.T, msgCount int) {
 	config := NewConfig()
-	config.Set("verbose", true)
 	config.Set("default_requeue_delay", 0)
 	config.Set("max_backoff_duration", time.Millisecond*50)
 	q, _ := NewConsumer(topicName, "ch", config)

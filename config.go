@@ -21,8 +21,6 @@ type Config struct {
 	sync.RWMutex
 	initOnce sync.Once
 
-	verbose bool `opt:"verbose"`
-
 	readTimeout  time.Duration `opt:"read_timeout" min:"100ms" max:"5m"`
 	writeTimeout time.Duration `opt:"write_timeout" min:"100ms" max:"5m"`
 
@@ -62,7 +60,6 @@ type Config struct {
 
 // NewConfig returns a new default configuration.
 //
-// 	"verbose":                false (bool)
 // 	"read_timeout":           60s (min: 100ms, max: 5m) (time.Duration)
 // 	"write_timeout":          1s (min: 100ms, max: 5m) (time.Duration)
 // 	"lookupd_poll_interval":  60s (min: 5s, max: 5m) (time.Duration)
@@ -143,8 +140,6 @@ func (c *Config) initialize() {
 // 	1 (an int where 1 == true and 0 == false)
 //
 // It returns an error for an invalid option or value.
-//
-// 	verbose (bool): enable verbose logging
 //
 // 	read_timeout (time.Duration): the deadline set for network reads
 // 	                              (min: 100ms, max: 5m)
