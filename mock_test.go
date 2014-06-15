@@ -218,8 +218,8 @@ func TestConsumerBackoff(t *testing.T) {
 
 	topicName := "test_consumer_commands" + strconv.Itoa(int(time.Now().Unix()))
 	config := NewConfig()
-	config.Set("max_in_flight", 5)
-	config.Set("backoff_multiplier", 10*time.Millisecond)
+	config.MaxInFlight = 5
+	config.BackoffMultiplier = 10 * time.Millisecond
 	q, _ := NewConsumer(topicName, "ch", config)
 	q.SetLogger(logger, LogLevelDebug)
 	q.SetHandler(&testHandler{})

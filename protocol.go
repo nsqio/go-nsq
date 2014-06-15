@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"regexp"
-	"time"
 )
 
 // MagicV1 is the initial identifier sent when connecting for V1 clients
@@ -20,9 +19,6 @@ const (
 	FrameTypeError    int32 = 1
 	FrameTypeMessage  int32 = 2
 )
-
-// The amount of time nsqd will allow a client to idle, can be overriden
-const DefaultClientTimeout = 60 * time.Second
 
 var validTopicNameRegex = regexp.MustCompile(`^[\.a-zA-Z0-9_-]+$`)
 var validChannelNameRegex = regexp.MustCompile(`^[\.a-zA-Z0-9_-]+(#ephemeral)?$`)

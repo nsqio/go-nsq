@@ -18,7 +18,7 @@ type Producer struct {
 	id     int64
 	addr   string
 	conn   *Conn
-	config *Config
+	config Config
 
 	logger *log.Logger
 	logLvl LogLevel
@@ -57,13 +57,21 @@ func (t *ProducerTransaction) finish() {
 }
 
 // NewProducer returns an instance of Producer for the specified address
-func NewProducer(addr string, config *Config) *Producer {
-	config.initialize()
-	return &Producer{
+//
+// The only valid way to create a Config is via NewConfig, using a struct literal will panic.
+// After Config is passed into NewProducer the values are no longer mutable (they are copied).
+func NewProducer(addr string, config *Config) (*Producer, error) {
+	config.assertInitialized()
+	err := config.Validate()
+	if err != nil {
+		return nil, err
+	}
+
+	p := &Producer{
 		id: atomic.AddInt64(&instCount, 1),
 
 		addr:   addr,
-		config: config,
+		config: *config,
 
 		logger: log.New(os.Stderr, "", log.Flags()),
 		logLvl: LogLevelInfo,
@@ -76,6 +84,7 @@ func NewProducer(addr string, config *Config) *Producer {
 		heartbeatChan:   make(chan int),
 		closeChan:       make(chan int),
 	}
+	return p, nil
 }
 
 // SetLogger assigns the logger to use as well as a level
@@ -111,7 +120,7 @@ func (w *Producer) Stop() {
 // When the Producer eventually receives the response from `nsqd`,
 // the supplied `doneChan` (if specified)
 // will receive a `ProducerTransaction` instance with the supplied variadic arguments
-// (and the response `FrameType`, `Data`, and `Error`)
+// and the response error if present
 func (w *Producer) PublishAsync(topic string, body []byte, doneChan chan *ProducerTransaction,
 	args ...interface{}) error {
 	return w.sendCommandAsync(Publish(topic, body), doneChan, args)
@@ -123,7 +132,7 @@ func (w *Producer) PublishAsync(topic string, body []byte, doneChan chan *Produc
 // When the Producer eventually receives the response from `nsqd`,
 // the supplied `doneChan` (if specified)
 // will receive a `ProducerTransaction` instance with the supplied variadic arguments
-// (and the response `FrameType`, `Data`, and `Error`)
+// and the response error if present
 func (w *Producer) MultiPublishAsync(topic string, body [][]byte, doneChan chan *ProducerTransaction,
 	args ...interface{}) error {
 	cmd, err := MultiPublish(topic, body)
@@ -134,13 +143,13 @@ func (w *Producer) MultiPublishAsync(topic string, body [][]byte, doneChan chan 
 }
 
 // Publish synchronously publishes a message body to the specified topic, returning
-// the response frameType, data, and error
+// the an error if publish failed
 func (w *Producer) Publish(topic string, body []byte) error {
 	return w.sendCommand(Publish(topic, body))
 }
 
 // MultiPublish synchronously publishes a slice of message bodies to the specified topic, returning
-// the response frameType, data, and error
+// the an error if publish failed
 func (w *Producer) MultiPublish(topic string, body [][]byte) error {
 	cmd, err := MultiPublish(topic, body)
 	if err != nil {
@@ -203,7 +212,7 @@ func (w *Producer) connect() error {
 
 	w.log(LogLevelInfo, "(%s) connecting to nsqd", w.addr)
 
-	conn := NewConn(w.addr, w.config)
+	conn := NewConn(w.addr, &w.config)
 	conn.SetLogger(w.logger, w.logLvl, fmt.Sprintf("%3d (%%s)", w.id))
 	conn.Delegate = &producerConnDelegate{w}
 
