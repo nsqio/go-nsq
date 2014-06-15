@@ -222,7 +222,7 @@ func TestConsumerBackoff(t *testing.T) {
 	config.BackoffMultiplier = 10 * time.Millisecond
 	q, _ := NewConsumer(topicName, "ch", config)
 	q.SetLogger(logger, LogLevelDebug)
-	q.SetHandler(&testHandler{})
+	q.AddHandler(&testHandler{})
 	err := q.ConnectToNSQD(n.tcpAddr.String())
 	if err != nil {
 		t.Fatalf(err.Error())

@@ -35,7 +35,7 @@ type Handler interface {
 // HandlerFunc is a convenience type to avoid having to declare a struct
 // to implement the Handler interface, it can be used like this:
 //
-// 	consumer.SetHandler(nsq.HandlerFunc(func(m *Message) error {
+// 	consumer.AddHandler(nsq.HandlerFunc(func(m *Message) error {
 // 		// handle the message
 // 	})
 type HandlerFunc func(message *Message) error
@@ -103,6 +103,7 @@ type Consumer struct {
 	wg              sync.WaitGroup
 	runningHandlers int32
 	stopFlag        int32
+	connectedFlag   int32
 	stopHandler     sync.Once
 
 	// read from this channel to block until consumer is cleanly stopped
@@ -226,9 +227,19 @@ func (r *Consumer) ChangeMaxInFlight(maxInFlight int) {
 //
 // A goroutine is spawned to handle continual polling.
 func (r *Consumer) ConnectToNSQLookupd(addr string) error {
+	if atomic.LoadInt32(&r.stopFlag) == 1 {
+		return errors.New("consumer stopped")
+	}
+	if atomic.LoadInt32(&r.runningHandlers) == 0 {
+		return errors.New("no handlers")
+	}
+
 	if err := validatedLookupAddr(addr); err != nil {
 		return err
 	}
+
+	atomic.StoreInt32(&r.connectedFlag, 1)
+
 	r.mtx.Lock()
 	for _, x := range r.lookupdHTTPAddrs {
 		if x == addr {
@@ -415,6 +426,8 @@ func (r *Consumer) ConnectToNSQD(addr string) error {
 	if atomic.LoadInt32(&r.runningHandlers) == 0 {
 		return errors.New("no handlers")
 	}
+
+	atomic.StoreInt32(&r.connectedFlag, 1)
 
 	_, pendingOk := r.pendingConnections[addr]
 	r.mtx.RLock()
@@ -871,26 +884,28 @@ func (r *Consumer) stopHandlers() {
 	})
 }
 
-// SetHandler sets the Handler for messages received by this Consumer.
+// AddHandler sets the Handler for messages received by this Consumer. This can be called
+// multiple times to add additional handlers. Handler will have a 1:1 ration to message handling goroutines.
+//
+// This panics if called after connecting to NSQD or NSQ Lookupd
 //
 // (see Handler or HandlerFunc for details on implementing this interface)
-func (r *Consumer) SetHandler(handler Handler) {
-	r.setHandlers(handler, 1)
+func (r *Consumer) AddHandler(handler Handler) {
+	r.AddConcurrentHandlers(handler, 1)
 }
 
-// SetConcurrentHandlers sets the Handler for messages received by this Consumer.  It
+// AddConcurrentHandlers sets the Handler for messages received by this Consumer.  It
 // takes a second argument which indicates the number of goroutines to spawn for
 // message handling.
 //
+// This panics if called after connecting to NSQD or NSQ Lookupd
+//
 // (see Handler or HandlerFunc for details on implementing this interface)
-func (r *Consumer) SetConcurrentHandlers(handler Handler, concurrency int) {
-	r.setHandlers(handler, concurrency)
-}
-
-func (r *Consumer) setHandlers(handler Handler, concurrency int) {
-	if atomic.LoadInt32(&r.runningHandlers) > 0 {
-		panic("cannot call setHandlers() multiple times")
+func (r *Consumer) AddConcurrentHandlers(handler Handler, concurrency int) {
+	if atomic.LoadInt32(&r.connectedFlag) == 1 {
+		panic("already connected")
 	}
+
 	atomic.AddInt32(&r.runningHandlers, int32(concurrency))
 	for i := 0; i < concurrency; i++ {
 		go r.handlerLoop(handler)

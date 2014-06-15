@@ -118,7 +118,7 @@ func consumerTest(t *testing.T, deflate bool, snappy bool, tlsv1 bool) {
 		t: t,
 		q: q,
 	}
-	q.SetHandler(h)
+	q.AddHandler(h)
 
 	SendMessage(t, 4151, topicName, "put", []byte(`{"msg":"single"}`))
 	SendMessage(t, 4151, topicName, "mput", []byte("{\"msg\":\"double\"}\n{\"msg\":\"double\"}"))
