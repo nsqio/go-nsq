@@ -36,6 +36,7 @@ type Producer struct {
 	stopFlag            int32
 	exitChan            chan int
 	wg                  sync.WaitGroup
+	guard               sync.Mutex
 }
 
 // ProducerTransaction is returned by the async publish methods
@@ -86,13 +87,17 @@ func (w *Producer) String() string {
 
 // Stop initiates a graceful stop of the Producer (permanent)
 //
-// NOTE: receive on StopChan to block until this process completes
+// NOTE: this blocks until completion
 func (w *Producer) Stop() {
+	w.guard.Lock()
 	if !atomic.CompareAndSwapInt32(&w.stopFlag, 0, 1) {
+		w.guard.Unlock()
 		return
 	}
+	w.log(LogLevelInfo, "stopping")
 	close(w.exitChan)
 	w.close()
+	w.guard.Unlock()
 	w.wg.Wait()
 }
 
@@ -181,6 +186,9 @@ func (w *Producer) sendCommandAsync(cmd *Command, doneChan chan *ProducerTransac
 }
 
 func (w *Producer) connect() error {
+	w.guard.Lock()
+	defer w.guard.Unlock()
+
 	if atomic.LoadInt32(&w.stopFlag) == 1 {
 		return ErrStopped
 	}
