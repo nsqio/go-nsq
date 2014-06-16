@@ -7,10 +7,10 @@ func TestConfigSet(t *testing.T) {
 	if err := c.Set("not a real config value", struct{}{}); err == nil {
 		t.Error("No error when setting an invalid value")
 	}
-	if err := c.Set("verbose", "lol"); err == nil {
-		t.Error("No error when setting `verbose` to an invalid value")
+	if err := c.Set("tls_v1", "lol"); err == nil {
+		t.Error("No error when setting `tls_v1` to an invalid value")
 	}
-	if err := c.Set("verbose", true); err != nil {
-		t.Errorf("Error setting `verbose` config: %v", err)
+	if err := c.Set("tls_v1", true); err != nil {
+		t.Errorf("Error setting `tls_v1` config: %v", err)
 	}
 }

@@ -98,7 +98,6 @@ func consumerTest(t *testing.T, deflate bool, snappy bool, tlsv1 bool) {
 	topicName = topicName + strconv.Itoa(int(time.Now().Unix()))
 
 	config := NewConfig()
-	config.Set("verbose", true)
 	// so that the test can simulate reaching max requeues and a call to LogFailedMessage
 	config.Set("default_requeue_delay", 0)
 	// so that the test wont timeout from backing off

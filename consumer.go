@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"net"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -129,6 +130,9 @@ func NewConsumer(topic string, channel string, config *Config) (*Consumer, error
 		topic:   topic,
 		channel: channel,
 		config:  config,
+
+		logger: log.New(os.Stderr, "", log.Flags()),
+		logLvl: LogLevelInfo,
 
 		incomingMessages: make(chan *Message),
 

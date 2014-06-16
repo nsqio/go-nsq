@@ -3,6 +3,7 @@ package nsq
 import (
 	"fmt"
 	"log"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -63,6 +64,9 @@ func NewProducer(addr string, config *Config) *Producer {
 
 		addr:   addr,
 		config: config,
+
+		logger: log.New(os.Stderr, "", log.Flags()),
+		logLvl: LogLevelInfo,
 
 		transactionChan: make(chan *ProducerTransaction),
 		exitChan:        make(chan int),
