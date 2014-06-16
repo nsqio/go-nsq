@@ -90,7 +90,9 @@ type Conn struct {
 
 // NewConn returns a new Conn instance
 func NewConn(addr string, config *Config) *Conn {
-	config.initialize()
+	if !config.initialized {
+		panic("Config must be created with NewConfig()")
+	}
 	return &Conn{
 		addr: addr,
 
@@ -144,11 +146,11 @@ func (c *Conn) Connect() (*IdentifyResponse, error) {
 	}
 
 	if resp != nil && resp.AuthRequired {
-		if c.config.authSecret == "" {
+		if c.config.AuthSecret == "" {
 			c.log(LogLevelError, "Auth Required")
 			return nil, errors.New("Auth Required")
 		}
-		err := c.auth(c.config.authSecret)
+		err := c.auth(c.config.AuthSecret)
 		if err != nil {
 			c.log(LogLevelError, "Auth Failed %s", err)
 			return nil, err
@@ -218,13 +220,13 @@ func (c *Conn) String() string {
 
 // Read performs a deadlined read on the underlying TCP connection
 func (c *Conn) Read(p []byte) (int, error) {
-	c.conn.SetReadDeadline(time.Now().Add(c.config.readTimeout))
+	c.conn.SetReadDeadline(time.Now().Add(c.config.ReadTimeout))
 	return c.r.Read(p)
 }
 
 // Write performs a deadlined write on the underlying TCP connection
 func (c *Conn) Write(p []byte) (int, error) {
-	c.conn.SetWriteDeadline(time.Now().Add(c.config.writeTimeout))
+	c.conn.SetWriteDeadline(time.Now().Add(c.config.WriteTimeout))
 	return c.w.Write(p)
 }
 
@@ -262,20 +264,20 @@ func (c *Conn) Flush() error {
 
 func (c *Conn) identify() (*IdentifyResponse, error) {
 	ci := make(map[string]interface{})
-	ci["client_id"] = c.config.clientID
-	ci["hostname"] = c.config.hostname
-	ci["user_agent"] = c.config.userAgent
-	ci["short_id"] = c.config.clientID // deprecated
-	ci["long_id"] = c.config.hostname  // deprecated
-	ci["tls_v1"] = c.config.tlsV1
-	ci["deflate"] = c.config.deflate
-	ci["deflate_level"] = c.config.deflateLevel
-	ci["snappy"] = c.config.snappy
+	ci["client_id"] = c.config.ClientID
+	ci["hostname"] = c.config.Hostname
+	ci["user_agent"] = c.config.UserAgent
+	ci["short_id"] = c.config.ClientID // deprecated
+	ci["long_id"] = c.config.Hostname  // deprecated
+	ci["tls_v1"] = c.config.TlsV1
+	ci["deflate"] = c.config.Deflate
+	ci["deflate_level"] = c.config.DeflateLevel
+	ci["snappy"] = c.config.Snappy
 	ci["feature_negotiation"] = true
-	ci["heartbeat_interval"] = int64(c.config.heartbeatInterval / time.Millisecond)
-	ci["sample_rate"] = c.config.sampleRate
-	ci["output_buffer_size"] = c.config.outputBufferSize
-	ci["output_buffer_timeout"] = int64(c.config.outputBufferTimeout / time.Millisecond)
+	ci["heartbeat_interval"] = int64(c.config.HeartbeatInterval / time.Millisecond)
+	ci["sample_rate"] = c.config.SampleRate
+	ci["output_buffer_size"] = c.config.OutputBufferSize
+	ci["output_buffer_timeout"] = int64(c.config.OutputBufferTimeout / time.Millisecond)
 	cmd, err := Identify(ci)
 	if err != nil {
 		return nil, ErrIdentify{err.Error()}
@@ -313,7 +315,7 @@ func (c *Conn) identify() (*IdentifyResponse, error) {
 
 	if resp.TLSv1 {
 		c.log(LogLevelInfo, "upgrading to TLS")
-		err := c.upgradeTLS(c.config.tlsConfig)
+		err := c.upgradeTLS(c.config.TlsConfig)
 		if err != nil {
 			return nil, ErrIdentify{err.Error()}
 		}
@@ -321,7 +323,7 @@ func (c *Conn) identify() (*IdentifyResponse, error) {
 
 	if resp.Deflate {
 		c.log(LogLevelInfo, "upgrading to Deflate")
-		err := c.upgradeDeflate(c.config.deflateLevel)
+		err := c.upgradeDeflate(c.config.DeflateLevel)
 		if err != nil {
 			return nil, ErrIdentify{err.Error()}
 		}
@@ -639,10 +641,10 @@ func (c *Conn) onMessageFinish(m *Message) {
 func (c *Conn) onMessageRequeue(m *Message, delay time.Duration, backoff bool) {
 	if delay == -1 {
 		// linear delay
-		delay = c.config.defaultRequeueDelay * time.Duration(m.Attempts)
+		delay = c.config.DefaultRequeueDelay * time.Duration(m.Attempts)
 		// bound the requeueDelay to configured max
-		if delay > c.config.maxRequeueDelay {
-			delay = c.config.maxRequeueDelay
+		if delay > c.config.MaxRequeueDelay {
+			delay = c.config.MaxRequeueDelay
 		}
 	}
 	c.msgResponseChan <- &msgResponse{m, Requeue(m.ID, delay), false, backoff}

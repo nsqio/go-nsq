@@ -39,7 +39,8 @@ func TestProducerConnection(t *testing.T) {
 	defer log.SetOutput(os.Stdout)
 
 	config := NewConfig()
-	w := NewProducer("127.0.0.1:4150", config)
+	w, _ := NewProducer("127.0.0.1:4150", config)
+	w.SetLogger(nullLogger, LogLevelInfo)
 
 	err := w.Publish("write_test", []byte("test"))
 	if err != nil {
@@ -62,7 +63,8 @@ func TestProducerPublish(t *testing.T) {
 	msgCount := 10
 
 	config := NewConfig()
-	w := NewProducer("127.0.0.1:4150", config)
+	w, _ := NewProducer("127.0.0.1:4150", config)
+	w.SetLogger(nullLogger, LogLevelInfo)
 	defer w.Stop()
 
 	for i := 0; i < msgCount; i++ {
@@ -88,7 +90,8 @@ func TestProducerMultiPublish(t *testing.T) {
 	msgCount := 10
 
 	config := NewConfig()
-	w := NewProducer("127.0.0.1:4150", config)
+	w, _ := NewProducer("127.0.0.1:4150", config)
+	w.SetLogger(nullLogger, LogLevelInfo)
 	defer w.Stop()
 
 	var testData [][]byte
@@ -117,7 +120,8 @@ func TestProducerPublishAsync(t *testing.T) {
 	msgCount := 10
 
 	config := NewConfig()
-	w := NewProducer("127.0.0.1:4150", config)
+	w, _ := NewProducer("127.0.0.1:4150", config)
+	w.SetLogger(nullLogger, LogLevelInfo)
 	defer w.Stop()
 
 	responseChan := make(chan *ProducerTransaction, msgCount)
@@ -154,7 +158,8 @@ func TestProducerMultiPublishAsync(t *testing.T) {
 	msgCount := 10
 
 	config := NewConfig()
-	w := NewProducer("127.0.0.1:4150", config)
+	w, _ := NewProducer("127.0.0.1:4150", config)
+	w.SetLogger(nullLogger, LogLevelInfo)
 	defer w.Stop()
 
 	var testData [][]byte
@@ -194,8 +199,9 @@ func TestProducerHeartbeat(t *testing.T) {
 	topicName := "heartbeat" + strconv.Itoa(int(time.Now().Unix()))
 
 	config := NewConfig()
-	config.Set("heartbeat_interval", 100*time.Millisecond)
-	w := NewProducer("127.0.0.1:4150", config)
+	config.HeartbeatInterval = 100 * time.Millisecond
+	w, _ := NewProducer("127.0.0.1:4150", config)
+	w.SetLogger(nullLogger, LogLevelInfo)
 	defer w.Stop()
 
 	err := w.Publish(topicName, []byte("publish_test_case"))
@@ -208,8 +214,9 @@ func TestProducerHeartbeat(t *testing.T) {
 	}
 
 	config = NewConfig()
-	config.Set("heartbeat_interval", 1000*time.Millisecond)
-	w = NewProducer("127.0.0.1:4150", config)
+	config.HeartbeatInterval = 1000 * time.Millisecond
+	w, _ = NewProducer("127.0.0.1:4150", config)
+	w.SetLogger(nullLogger, LogLevelInfo)
 	defer w.Stop()
 
 	err = w.Publish(topicName, []byte("publish_test_case"))
@@ -237,9 +244,10 @@ func TestProducerHeartbeat(t *testing.T) {
 
 func readMessages(topicName string, t *testing.T, msgCount int) {
 	config := NewConfig()
-	config.Set("default_requeue_delay", 0)
-	config.Set("max_backoff_duration", time.Millisecond*50)
+	config.DefaultRequeueDelay = 0
+	config.MaxBackoffDuration = 50 * time.Millisecond
 	q, _ := NewConsumer(topicName, "ch", config)
+	q.SetLogger(nullLogger, LogLevelInfo)
 
 	h := &ConsumerHandler{
 		t: t,

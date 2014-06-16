@@ -14,3 +14,15 @@ func TestConfigSet(t *testing.T) {
 		t.Errorf("Error setting `tls_v1` config: %v", err)
 	}
 }
+
+func TestConfigValidate(t *testing.T) {
+	c := NewConfig()
+	if err := c.Validate(); err != nil {
+		t.Error("initialized config is invalid")
+	}
+	c.DeflateLevel = 100
+	if err := c.Validate(); err == nil {
+		t.Error("no error set for invalid value")
+	}
+
+}

@@ -23,6 +23,8 @@ type MyTestHandler struct {
 	messagesFailed   int
 }
 
+var nullLogger = log.New(ioutil.Discard, "", log.LstdFlags)
+
 func (h *MyTestHandler) LogFailedMessage(message *Message) {
 	h.messagesFailed++
 	h.q.Stop()
@@ -84,7 +86,6 @@ func TestConsumerTLSSnappy(t *testing.T) {
 }
 
 func consumerTest(t *testing.T, deflate bool, snappy bool, tlsv1 bool) {
-	logger := log.New(ioutil.Discard, "", log.LstdFlags)
 
 	topicName := "rdr_test"
 	if deflate {
@@ -99,20 +100,19 @@ func consumerTest(t *testing.T, deflate bool, snappy bool, tlsv1 bool) {
 
 	config := NewConfig()
 	// so that the test can simulate reaching max requeues and a call to LogFailedMessage
-	config.Set("default_requeue_delay", 0)
+	config.DefaultRequeueDelay = 0
 	// so that the test wont timeout from backing off
-	config.Set("max_backoff_duration", time.Millisecond*50)
-	config.Set("deflate", deflate)
-	config.Set("deflate_level", 6)
-	config.Set("snappy", snappy)
-	config.Set("tls_v1", tlsv1)
+	config.MaxBackoffDuration = time.Millisecond * 50
+	config.Deflate = deflate
+	config.Snappy = snappy
+	config.TlsV1 = tlsv1
 	if tlsv1 {
-		config.Set("tls_config", &tls.Config{
+		config.TlsConfig = &tls.Config{
 			InsecureSkipVerify: true,
-		})
+		}
 	}
 	q, _ := NewConsumer(topicName, "ch", config)
-	q.SetLogger(logger, LogLevelInfo)
+	q.SetLogger(nullLogger, LogLevelInfo)
 
 	h := &MyTestHandler{
 		t: t,

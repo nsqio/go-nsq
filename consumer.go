@@ -70,6 +70,7 @@ type Consumer struct {
 	messagesRequeued uint64
 	totalRdyCount    int64
 	backoffDuration  int64
+	maxInFlight      int32
 
 	mtx sync.RWMutex
 
@@ -79,7 +80,7 @@ type Consumer struct {
 	id      int64
 	topic   string
 	channel string
-	config  *Config
+	config  Config
 
 	backoffChan          chan bool
 	rdyChan              chan *Conn
@@ -111,10 +112,14 @@ type Consumer struct {
 
 // NewConsumer creates a new instance of Consumer for the specified topic/channel
 //
-// The returned Consumer instance is setup with sane default values.  To modify
-// configuration, update the values on the returned instance before connecting.
+// The only valid way to create a Config is via NewConfig, using a struct literal will panic.
+// After Config is passed into NewConsumer the values are no longer mutable (they are copied).
 func NewConsumer(topic string, channel string, config *Config) (*Consumer, error) {
-	config.initialize()
+	config.assertInitialized()
+
+	if err := config.Validate(); err != nil {
+		return nil, err
+	}
 
 	if !IsValidTopicName(topic) {
 		return nil, errors.New("invalid topic name")
@@ -129,10 +134,11 @@ func NewConsumer(topic string, channel string, config *Config) (*Consumer, error
 
 		topic:   topic,
 		channel: channel,
-		config:  config,
+		config:  *config,
 
-		logger: log.New(os.Stderr, "", log.Flags()),
-		logLvl: LogLevelInfo,
+		logger:      log.New(os.Stderr, "", log.Flags()),
+		logLvl:      LogLevelInfo,
+		maxInFlight: int32(config.MaxInFlight),
 
 		incomingMessages: make(chan *Message),
 
@@ -173,7 +179,7 @@ func (r *Consumer) SetLogger(logger *log.Logger, lvl LogLevel) {
 // This may change dynamically based on the number of connections to nsqd the Consumer
 // is responsible for.
 func (r *Consumer) perConnMaxInFlight() int64 {
-	b := float64(r.maxInFlight())
+	b := float64(r.getMaxInFlight())
 	s := b / float64(len(r.conns()))
 	return int64(math.Min(math.Max(1, s), b))
 }
@@ -191,25 +197,22 @@ func (r *Consumer) IsStarved() bool {
 	return false
 }
 
-func (r *Consumer) maxInFlight() int {
-	r.config.RLock()
-	mif := r.config.maxInFlight
-	r.config.RUnlock()
-	return mif
+func (r *Consumer) getMaxInFlight() int32 {
+	return atomic.LoadInt32(&r.maxInFlight)
 }
 
-// SetMaxInFlight sets the maximum number of messages this comsumer instance
-// will allow in-flight.
+// ChangeMaxInFlight sets a new maximum number of messages this comsumer instance
+// will allow in-flight, and updates all existing connections as appropriate.
 //
+// For example, ChangeMaxInFlight(0) would pause message flow
+// 
 // If already connected, it updates the reader RDY state for each connection.
-func (r *Consumer) SetMaxInFlight(maxInFlight int) {
-	r.config.RLock()
-	mif := r.config.maxInFlight
-	r.config.RUnlock()
-	if mif == maxInFlight {
+func (r *Consumer) ChangeMaxInFlight(maxInFlight int) {
+	if r.getMaxInFlight() == int32(maxInFlight) {
 		return
 	}
-	r.config.Set("max_in_flight", maxInFlight)
+
+	atomic.StoreInt32(&r.maxInFlight, int32(maxInFlight))
 
 	for _, c := range r.conns() {
 		r.rdyChan <- c
@@ -282,8 +285,8 @@ func (r *Consumer) lookupdLoop() {
 	// add some jitter so that multiple consumers discovering the same topic,
 	// when restarted at the same time, dont all connect at once.
 	jitter := time.Duration(int64(rng.Float64() *
-		r.config.lookupdPollJitter * float64(r.config.lookupdPollInterval)))
-	ticker := time.NewTicker(r.config.lookupdPollInterval)
+		r.config.LookupdPollJitter * float64(r.config.LookupdPollInterval)))
+	ticker := time.NewTicker(r.config.LookupdPollInterval)
 
 	select {
 	case <-time.After(jitter):
@@ -424,7 +427,7 @@ func (r *Consumer) ConnectToNSQD(addr string) error {
 
 	r.log(LogLevelInfo, "(%s) connecting to nsqd", addr)
 
-	conn := NewConn(addr, r.config)
+	conn := NewConn(addr, &r.config)
 	conn.SetLogger(r.logger, r.logLvl,
 		fmt.Sprintf("%3d [%s/%s] (%%s)", r.id, r.topic, r.channel))
 	conn.Delegate = &consumerConnDelegate{r}
@@ -445,10 +448,10 @@ func (r *Consumer) ConnectToNSQD(addr string) error {
 	}
 
 	if resp != nil {
-		if resp.MaxRdyCount < int64(r.maxInFlight()) {
+		if resp.MaxRdyCount < int64(r.getMaxInFlight()) {
 			r.log(LogLevelWarning,
 				"(%s) max RDY count %d < consumer max in flight %d, truncation possible",
-				conn.String(), resp.MaxRdyCount, r.maxInFlight())
+				conn.String(), resp.MaxRdyCount, r.getMaxInFlight())
 		}
 	}
 
@@ -541,7 +544,7 @@ func (r *Consumer) onConnClose(c *Conn) {
 	r.log(LogLevelWarning, "there are %d connections left alive", left)
 
 	if (hasRDYRetryTimer || rdyCount > 0) &&
-		(left == r.maxInFlight() || r.inBackoff()) {
+		(int32(left) == r.getMaxInFlight() || r.inBackoff()) {
 		// we're toggling out of (normal) redistribution cases and this conn
 		// had a RDY count...
 		//
@@ -586,10 +589,10 @@ func (r *Consumer) onConnClose(c *Conn) {
 }
 
 func (r *Consumer) backoffDurationForCount(count int32) time.Duration {
-	backoffDuration := r.config.backoffMultiplier *
+	backoffDuration := r.config.BackoffMultiplier *
 		time.Duration(math.Pow(2, float64(count)))
-	if backoffDuration > r.config.maxBackoffDuration {
-		backoffDuration = r.config.maxBackoffDuration
+	if backoffDuration > r.config.MaxBackoffDuration {
+		backoffDuration = r.config.MaxBackoffDuration
 	}
 	return backoffDuration
 }
@@ -673,7 +676,7 @@ func (r *Consumer) rdyLoop() {
 				}
 			} else {
 				maxBackoffCount := int32(math.Max(1, math.Ceil(
-					math.Log2(r.config.maxBackoffDuration.Seconds()))))
+					math.Log2(r.config.MaxBackoffDuration.Seconds()))))
 				if backoffCounter < maxBackoffCount {
 					backoffCounter++
 					backoffUpdated = true
@@ -746,7 +749,7 @@ func (r *Consumer) updateRDY(c *Conn, count int64) error {
 	// never exceed our global max in flight. truncate if possible.
 	// this could help a new connection get partial max-in-flight
 	rdyCount := c.RDY()
-	maxPossibleRdy := int64(r.maxInFlight()) - atomic.LoadInt64(&r.totalRdyCount) + rdyCount
+	maxPossibleRdy := int64(r.getMaxInFlight()) - atomic.LoadInt64(&r.totalRdyCount) + rdyCount
 	if maxPossibleRdy > 0 && maxPossibleRdy < count {
 		count = maxPossibleRdy
 	}
@@ -789,8 +792,8 @@ func (r *Consumer) redistributeRDY() {
 		return
 	}
 
-	numConns := len(r.conns())
-	maxInFlight := r.maxInFlight()
+	numConns := int32(len(r.conns()))
+	maxInFlight := r.getMaxInFlight()
 	if numConns > maxInFlight {
 		r.log(LogLevelDebug, "redistributing RDY state (%d conns > %d max_in_flight)",
 			numConns, maxInFlight)
@@ -813,7 +816,7 @@ func (r *Consumer) redistributeRDY() {
 		rdyCount := c.RDY()
 		r.log(LogLevelDebug, "(%s) rdy: %d (last message received %s)",
 			c.String(), rdyCount, lastMsgDuration)
-		if rdyCount > 0 && lastMsgDuration > r.config.lowRdyIdleTimeout {
+		if rdyCount > 0 && lastMsgDuration > r.config.LowRdyIdleTimeout {
 			r.log(LogLevelDebug, "(%s) idle connection, giving up RDY", c.String())
 			r.updateRDY(c, 0)
 		}
@@ -932,7 +935,7 @@ exit:
 
 func (r *Consumer) shouldFailMessage(message *Message, handler interface{}) bool {
 	// message passed the max number of attempts
-	if r.config.maxAttempts > 0 && message.Attempts > r.config.maxAttempts {
+	if r.config.MaxAttempts > 0 && message.Attempts > r.config.MaxAttempts {
 		r.log(LogLevelWarning, "msg %s attempted %d times, giving up",
 			message.ID, message.Attempts)
 
