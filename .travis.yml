@@ -2,7 +2,7 @@ language: go
 go:
   - 1.0.3
   - 1.1.2
-  - 1.2
+  - 1.2.2
 env:
   - GOARCH=amd64
   - GOARCH=386
@@ -10,9 +10,9 @@ install:
   - go get github.com/bitly/go-simplejson
   - go get github.com/mreiferson/go-snappystream
 script:
-  - wget https://github.com/bitly/nsq/releases/download/v0.2.24/nsq-0.2.24.linux-amd64.go1.2.tar.gz
-  - tar zxvf nsq-0.2.24.linux-amd64.go1.2.tar.gz
-  - sudo cp nsq-0.2.24.linux-amd64.go1.2/bin/nsqd nsq-0.2.24.linux-amd64.go1.2/bin/nsqlookupd /usr/local/bin
+  - wget https://github.com/bitly/nsq/releases/download/v0.2.28/nsq-0.2.28.linux-amd64.go1.2.1.tar.gz
+  - tar zxvf nsq-0.2.28.linux-amd64.go1.2.1.tar.gz
+  - sudo cp nsq-0.2.28.linux-amd64.go1.2.1/bin/nsqd nsq-0.2.28.linux-amd64.go1.2.1/bin/nsqlookupd /usr/local/bin
   - pushd $TRAVIS_BUILD_DIR
   - ./test.sh
   - popd
