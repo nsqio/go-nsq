@@ -64,7 +64,7 @@ type Conn struct {
 	tlsConn *tls.Conn
 	addr    string
 
-	Delegate ConnDelegate
+	delegate ConnDelegate
 
 	logger *log.Logger
 	logLvl LogLevel
@@ -89,7 +89,7 @@ type Conn struct {
 }
 
 // NewConn returns a new Conn instance
-func NewConn(addr string, config *Config) *Conn {
+func NewConn(addr string, config *Config, delegate ConnDelegate) *Conn {
 	if !config.initialized {
 		panic("Config must be created with NewConfig()")
 	}
@@ -97,6 +97,7 @@ func NewConn(addr string, config *Config) *Conn {
 		addr: addr,
 
 		config: config,
+		delegate: delegate,
 
 		maxRdyCount:      2500,
 		lastMsgTimestamp: time.Now().UnixNano(),
@@ -245,7 +246,7 @@ exit:
 	c.mtx.Unlock()
 	if err != nil {
 		c.log(LogLevelError, "IO error - %s", err)
-		c.Delegate.OnIOError(c, err)
+		c.delegate.OnIOError(c, err)
 	}
 	return err
 }
@@ -441,18 +442,18 @@ func (c *Conn) readLoop() {
 		if err != nil {
 			if !strings.Contains(err.Error(), "use of closed network connection") {
 				c.log(LogLevelError, "IO error - %s", err)
-				c.Delegate.OnIOError(c, err)
+				c.delegate.OnIOError(c, err)
 			}
 			goto exit
 		}
 
 		if frameType == FrameTypeResponse && bytes.Equal(data, []byte("_heartbeat_")) {
 			c.log(LogLevelDebug, "heartbeat received")
-			c.Delegate.OnHeartbeat(c)
+			c.delegate.OnHeartbeat(c)
 			err := c.WriteCommand(Nop())
 			if err != nil {
 				c.log(LogLevelError, "IO error - %s", err)
-				c.Delegate.OnIOError(c, err)
+				c.delegate.OnIOError(c, err)
 				goto exit
 			}
 			continue
@@ -460,12 +461,12 @@ func (c *Conn) readLoop() {
 
 		switch frameType {
 		case FrameTypeResponse:
-			c.Delegate.OnResponse(c, data)
+			c.delegate.OnResponse(c, data)
 		case FrameTypeMessage:
 			msg, err := DecodeMessage(data)
 			if err != nil {
 				c.log(LogLevelError, "IO error - %s", err)
-				c.Delegate.OnIOError(c, err)
+				c.delegate.OnIOError(c, err)
 				goto exit
 			}
 			msg.Delegate = &connMessageDelegate{c}
@@ -474,13 +475,13 @@ func (c *Conn) readLoop() {
 			atomic.AddInt64(&c.messagesInFlight, 1)
 			atomic.StoreInt64(&c.lastMsgTimestamp, time.Now().UnixNano())
 
-			c.Delegate.OnMessage(c, msg)
+			c.delegate.OnMessage(c, msg)
 		case FrameTypeError:
 			c.log(LogLevelError, "protocol error - %s", data)
-			c.Delegate.OnError(c, data)
+			c.delegate.OnError(c, data)
 		default:
 			c.log(LogLevelError, "IO error - %s", err)
-			c.Delegate.OnIOError(c, fmt.Errorf("unknown frame type %d", frameType))
+			c.delegate.OnIOError(c, fmt.Errorf("unknown frame type %d", frameType))
 		}
 	}
 
@@ -528,15 +529,15 @@ func (c *Conn) writeLoop() {
 
 			if resp.success {
 				c.log(LogLevelDebug, "FIN %s", resp.msg.ID)
-				c.Delegate.OnMessageFinished(c, resp.msg)
+				c.delegate.OnMessageFinished(c, resp.msg)
 				if resp.backoff {
-					c.Delegate.OnResume(c)
+					c.delegate.OnResume(c)
 				}
 			} else {
 				c.log(LogLevelDebug, "REQ %s", resp.msg.ID)
-				c.Delegate.OnMessageRequeued(c, resp.msg)
+				c.delegate.OnMessageRequeued(c, resp.msg)
 				if resp.backoff {
-					c.Delegate.OnBackoff(c)
+					c.delegate.OnBackoff(c)
 				}
 			}
 
@@ -631,7 +632,7 @@ func (c *Conn) waitForCleanup() {
 	c.wg.Wait()
 	c.conn.CloseWrite()
 	c.log(LogLevelInfo, "clean close complete")
-	c.Delegate.OnClose(c)
+	c.delegate.OnClose(c)
 }
 
 func (c *Conn) onMessageFinish(m *Message) {

@@ -427,10 +427,9 @@ func (r *Consumer) ConnectToNSQD(addr string) error {
 
 	r.log(LogLevelInfo, "(%s) connecting to nsqd", addr)
 
-	conn := NewConn(addr, &r.config)
+	conn := NewConn(addr, &r.config, &consumerConnDelegate{r})
 	conn.SetLogger(r.logger, r.logLvl,
 		fmt.Sprintf("%3d [%s/%s] (%%s)", r.id, r.topic, r.channel))
-	conn.Delegate = &consumerConnDelegate{r}
 
 	cleanupConnection := func() {
 		r.mtx.Lock()
