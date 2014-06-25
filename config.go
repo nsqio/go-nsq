@@ -2,8 +2,10 @@ package nsq
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 	"reflect"
@@ -13,6 +15,11 @@ import (
 	"unsafe"
 )
 
+type configHandler interface {
+	Handles(option string) bool
+	Set(c *Config, option string, value interface{}) error
+}
+
 // Config is a struct of NSQ options
 //
 // The only valid way to create a Config is via NewConfig, using a struct literal will panic.
@@ -21,7 +28,8 @@ import (
 //
 // Use Set(key string, value interface{}) as an alternate way to set parameters
 type Config struct {
-	initialized bool
+	initialized    bool
+	configHandlers []configHandler
 
 	// Deadlines for network reads and writes
 	ReadTimeout  time.Duration `opt:"read_timeout" min:"100ms" max:"5m" default:"60s"`
@@ -57,6 +65,7 @@ type Config struct {
 	SampleRate int32 `opt:"sample_rate" min:"0" max:"99"`
 
 	// TLS Settings
+	// use tls-root-ca-file and tls-insecure-skip-verify to set tls config options
 	TlsV1     bool        `opt:"tls_v1"`
 	TlsConfig *tls.Config `opt:"tls_config"`
 
@@ -89,6 +98,7 @@ type Config struct {
 // This must be used to initialize Config structs. Values can be set directly, or through Config.Set()
 func NewConfig() *Config {
 	c := &Config{}
+	c.configHandlers = append(c.configHandlers, &tlsHandler{})
 	c.initialized = true
 	if err := c.setDefaults(); err != nil {
 		panic(err.Error())
@@ -118,6 +128,12 @@ func NewConfig() *Config {
 func (c *Config) Set(option string, value interface{}) error {
 
 	c.assertInitialized()
+
+	for _, h := range c.configHandlers {
+		if h.Handles(option) {
+			return h.Set(c, option, value)
+		}
+	}
 
 	val := reflect.ValueOf(c).Elem()
 	typ := val.Type()
@@ -232,6 +248,52 @@ func (c *Config) setDefaults() error {
 	c.UserAgent = fmt.Sprintf("go-nsq/%s", VERSION)
 
 	return nil
+}
+
+type tlsHandler struct {
+}
+
+func (t *tlsHandler) Handles(option string) bool {
+	switch option {
+	case "tls-root-ca-file", "tls-insecure-skip-verify":
+		return true
+	}
+	return false
+}
+func (t *tlsHandler) Set(c *Config, option string, value interface{}) error {
+	if c.TlsConfig == nil {
+		c.TlsConfig = &tls.Config{}
+	}
+	val := reflect.ValueOf(c.TlsConfig).Elem()
+
+	switch option {
+	case "tls-root-ca-file":
+		filename, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("ERROR: %v is not a string", value)
+		}
+		tlsCertPool := x509.NewCertPool()
+		ca_cert_file, err := ioutil.ReadFile(filename)
+		if err != nil {
+			return fmt.Errorf("ERROR: failed to read custom Certificate Authority file %s", err)
+		}
+		if !tlsCertPool.AppendCertsFromPEM(ca_cert_file) {
+			return fmt.Errorf("ERROR: failed to append certificates from Certificate Authority file")
+		}
+		c.TlsConfig.ClientCAs = tlsCertPool
+		return nil
+	case "tls-insecure-skip-verify":
+		fieldVal := val.FieldByName("InsecureSkipVerify")
+		dest := unsafeValueOf(fieldVal)
+		coercedVal, err := coerce(value, fieldVal.Type())
+		if err != nil {
+			return fmt.Errorf("failed to coerce option %s (%v) - %s",
+				option, value, err)
+		}
+		dest.Set(coercedVal)
+		return nil
+	}
+	return fmt.Errorf("unknown option %s", option)
 }
 
 // because Config contains private structs we can't use reflect.Value

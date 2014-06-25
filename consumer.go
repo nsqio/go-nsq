@@ -205,7 +205,7 @@ func (r *Consumer) getMaxInFlight() int32 {
 // will allow in-flight, and updates all existing connections as appropriate.
 //
 // For example, ChangeMaxInFlight(0) would pause message flow
-// 
+//
 // If already connected, it updates the reader RDY state for each connection.
 func (r *Consumer) ChangeMaxInFlight(maxInFlight int) {
 	if r.getMaxInFlight() == int32(maxInFlight) {
