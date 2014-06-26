@@ -96,7 +96,7 @@ func NewConn(addr string, config *Config, delegate ConnDelegate) *Conn {
 	return &Conn{
 		addr: addr,
 
-		config: config,
+		config:   config,
 		delegate: delegate,
 
 		maxRdyCount:      2500,
@@ -348,9 +348,20 @@ func (c *Conn) identify() (*IdentifyResponse, error) {
 	return resp, nil
 }
 
-func (c *Conn) upgradeTLS(conf *tls.Config) error {
-	c.tlsConn = tls.Client(c.conn, conf)
-	err := c.tlsConn.Handshake()
+func (c *Conn) upgradeTLS(tlsConf *tls.Config) error {
+	// create a local copy of the config to set ServerName for this connection
+	var conf tls.Config
+	if tlsConf != nil {
+		conf = *tlsConf
+	}
+	host, _, err := net.SplitHostPort(c.addr)
+	if err != nil {
+		return err
+	}
+	conf.ServerName = host
+
+	c.tlsConn = tls.Client(c.conn, &conf)
+	err = c.tlsConn.Handshake()
 	if err != nil {
 		return err
 	}
