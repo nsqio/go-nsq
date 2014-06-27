@@ -15,9 +15,15 @@ import (
 	"unsafe"
 )
 
+// Define handlers for setting config defaults, and setting config values from command line arguments or config files
 type configHandler interface {
-	Handles(option string) bool
+	HandlesOption(c *Config, option string) bool
 	Set(c *Config, option string, value interface{}) error
+	Validate(c *Config) error
+}
+
+type defaultsHandler interface {
+	SetDefaults(c *Config) error
 }
 
 // Config is a struct of NSQ options
@@ -28,7 +34,9 @@ type configHandler interface {
 //
 // Use Set(key string, value interface{}) as an alternate way to set parameters
 type Config struct {
-	initialized    bool
+	initialized bool
+
+	// used to Initialize, Validate
 	configHandlers []configHandler
 
 	// Deadlines for network reads and writes
@@ -98,7 +106,7 @@ type Config struct {
 // This must be used to initialize Config structs. Values can be set directly, or through Config.Set()
 func NewConfig() *Config {
 	c := &Config{}
-	c.configHandlers = append(c.configHandlers, &tlsHandler{})
+	c.configHandlers = append(c.configHandlers, &structTagsConfig{}, &tlsConfig{})
 	c.initialized = true
 	if err := c.setDefaults(); err != nil {
 		panic(err.Error())
@@ -130,22 +138,77 @@ func (c *Config) Set(option string, value interface{}) error {
 	c.assertInitialized()
 
 	for _, h := range c.configHandlers {
-		if h.Handles(option) {
+		if h.HandlesOption(c, option) {
 			return h.Set(c, option, value)
 		}
 	}
+	return fmt.Errorf("invalid option %s", option)
+}
 
+func (c *Config) assertInitialized() {
+	if !c.initialized {
+		panic("Config{} must be created with NewConfig()")
+	}
+}
+
+// Validate checks that all values are within specified min/max ranges
+func (c *Config) Validate() error {
+
+	c.assertInitialized()
+
+	for _, h := range c.configHandlers {
+		if err := h.Validate(c); err != nil {
+			return err
+		}
+	}
+	return nil
+
+}
+
+func (c *Config) setDefaults() error {
+	for _, h := range c.configHandlers {
+		hh, ok := h.(defaultsHandler)
+		if ok {
+			if err := hh.SetDefaults(c); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+type structTagsConfig struct {
+}
+
+// Handle options that are listed in StructTags
+func (h *structTagsConfig) HandlesOption(c *Config, option string) bool {
 	val := reflect.ValueOf(c).Elem()
 	typ := val.Type()
 	for i := 0; i < typ.NumField(); i++ {
 		field := typ.Field(i)
 		opt := field.Tag.Get("opt")
-		min := field.Tag.Get("min")
-		max := field.Tag.Get("max")
+		if opt == option {
+			return true
+		}
+	}
+	return false
+}
+
+// Set values based on parameters in StructTags
+func (h *structTagsConfig) Set(c *Config, option string, value interface{}) error {
+	val := reflect.ValueOf(c).Elem()
+	typ := val.Type()
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		opt := field.Tag.Get("opt")
 
 		if option != opt {
 			continue
 		}
+
+		min := field.Tag.Get("min")
+		max := field.Tag.Get("max")
 
 		fieldVal := val.FieldByName(field.Name)
 		dest := unsafeValueOf(fieldVal)
@@ -171,21 +234,37 @@ func (c *Config) Set(option string, value interface{}) error {
 		dest.Set(coercedVal)
 		return nil
 	}
-
-	return fmt.Errorf("invalid option %s", option)
+	return fmt.Errorf("unknown option %s", option)
 }
 
-func (c *Config) assertInitialized() {
-	if !c.initialized {
-		panic("Config{} must be created with NewConfig()")
+func (h *structTagsConfig) SetDefaults(c *Config) error {
+	val := reflect.ValueOf(c).Elem()
+	typ := val.Type()
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		opt := field.Tag.Get("opt")
+		defaultVal := field.Tag.Get("default")
+		if defaultVal == "" || opt == "" {
+			continue
+		}
+
+		if err := c.Set(opt, defaultVal); err != nil {
+			return err
+		}
 	}
+
+	hostname, err := os.Hostname()
+	if err != nil {
+		log.Fatalf("ERROR: unable to get hostname %s", err.Error())
+	}
+
+	c.ClientID = strings.Split(hostname, ".")[0]
+	c.Hostname = hostname
+	c.UserAgent = fmt.Sprintf("go-nsq/%s", VERSION)
+	return nil
 }
 
-// Validate checks that all values are within specified min/max ranges
-func (c *Config) Validate() error {
-
-	c.assertInitialized()
-
+func (h *structTagsConfig) Validate(c *Config) error {
 	val := reflect.ValueOf(c).Elem()
 	typ := val.Type()
 	for i := 0; i < typ.NumField(); i++ {
@@ -222,45 +301,18 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-func (c *Config) setDefaults() error {
-	val := reflect.ValueOf(c).Elem()
-	typ := val.Type()
-	for i := 0; i < typ.NumField(); i++ {
-		field := typ.Field(i)
-		opt := field.Tag.Get("opt")
-		defaultVal := field.Tag.Get("default")
-		if defaultVal == "" || opt == "" {
-			continue
-		}
-
-		if err := c.Set(opt, defaultVal); err != nil {
-			return err
-		}
-	}
-
-	hostname, err := os.Hostname()
-	if err != nil {
-		log.Fatalf("ERROR: unable to get hostname %s", err.Error())
-	}
-
-	c.ClientID = strings.Split(hostname, ".")[0]
-	c.Hostname = hostname
-	c.UserAgent = fmt.Sprintf("go-nsq/%s", VERSION)
-
-	return nil
+// Parsing for higher order TLS settings
+type tlsConfig struct {
 }
 
-type tlsHandler struct {
-}
-
-func (t *tlsHandler) Handles(option string) bool {
+func (t *tlsConfig) HandlesOption(c *Config, option string) bool {
 	switch option {
 	case "tls-root-ca-file", "tls-insecure-skip-verify":
 		return true
 	}
 	return false
 }
-func (t *tlsHandler) Set(c *Config, option string, value interface{}) error {
+func (t *tlsConfig) Set(c *Config, option string, value interface{}) error {
 	if c.TlsConfig == nil {
 		c.TlsConfig = &tls.Config{}
 	}
@@ -294,6 +346,9 @@ func (t *tlsHandler) Set(c *Config, option string, value interface{}) error {
 		return nil
 	}
 	return fmt.Errorf("unknown option %s", option)
+}
+func (t *tlsConfig) Validate(c *Config) error {
+	return nil
 }
 
 // because Config contains private structs we can't use reflect.Value
