@@ -97,6 +97,9 @@ type Config struct {
 	// Maximum amount of time to backoff when processing fails 0 == no backoff
 	MaxBackoffDuration time.Duration `opt:"max_backoff_duration" min:"0" max:"60m" default:"2m"`
 
+	// The server-side message timeout for messages delivered to this client
+	MsgTimeout time.Duration `opt:"msg_timeout" min:"0"`
+
 	// secret for nsqd authentication (requires nsqd 0.2.29+)
 	AuthSecret string `opt:"auth_secret"`
 }

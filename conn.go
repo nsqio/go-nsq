@@ -279,6 +279,7 @@ func (c *Conn) identify() (*IdentifyResponse, error) {
 	ci["sample_rate"] = c.config.SampleRate
 	ci["output_buffer_size"] = c.config.OutputBufferSize
 	ci["output_buffer_timeout"] = int64(c.config.OutputBufferTimeout / time.Millisecond)
+	ci["msg_timeout"] = int64(c.config.MsgTimeout / time.Millisecond)
 	cmd, err := Identify(ci)
 	if err != nil {
 		return nil, ErrIdentify{err.Error()}
