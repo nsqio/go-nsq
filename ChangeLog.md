@@ -1,5 +1,20 @@
 ## go-nsq Change Log
 
+### 1.0.0-alpha
+
+**Upgrading from 0.3.7**: The public API was refactored considerably and is not backwards
+compatible, please read [UPGRADING](UPGRADING.md).
+
+ * #58 - support IDENTIFY `msg_timeout`
+ * #54 - per-connection TLS config and set ServerName
+ * #45 - fix producer connect/close race
+ * #49 - add common connect helpers
+ * #43 - more flexible nsqlookupd URL specification
+ * #35 - AUTH support
+ * #41 - use package private RNG
+ * #36 - support 64char topic/channel names
+ * #30/#38/#39/#42/#46/#48/#51/#52 - refactor public API (see [UPGRADING](UPGRADING.md))
+
 ### 0.3.7 - 2014-05-25
 
 **Upgrading from 0.3.6**: There are no backward incompatible changes. **THIS IS THE LAST STABLE
