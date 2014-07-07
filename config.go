@@ -63,7 +63,7 @@ type Config struct {
 
 	// Identifiers sent to nsqd representing this client
 	// UserAgent is in the spirit of HTTP (default: "<client_library_name>/<version>")
-	ClientID  string `opt:"client_id"` // deprecated (defaults: short hostname)
+	ClientID  string `opt:"client_id"` // (defaults: short hostname)
 	Hostname  string `opt:"hostname"`
 	UserAgent string `opt:"user_agent"`
 

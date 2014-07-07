@@ -378,15 +378,11 @@ func (r *Consumer) queryLookupd() {
 	// }
 	for i := range data.Get("producers").MustArray() {
 		producer := data.Get("producers").GetIndex(i)
-		address := producer.Get("address").MustString()
-		broadcastAddress, ok := producer.CheckGet("broadcast_address")
-		if ok {
-			address = broadcastAddress.MustString()
-		}
+		broadcastAddress := producer.Get("broadcast_address").MustString()
 		port := producer.Get("tcp_port").MustInt()
 
 		// make an address, start a connection
-		joined := net.JoinHostPort(address, strconv.Itoa(port))
+		joined := net.JoinHostPort(broadcastAddress, strconv.Itoa(port))
 		err = r.ConnectToNSQD(joined)
 		if err != nil && err != ErrAlreadyConnected {
 			r.log(LogLevelError, "(%s) error connecting to nsqd - %s", joined, err)
