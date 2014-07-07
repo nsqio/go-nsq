@@ -359,26 +359,22 @@ func (r *Consumer) queryLookupd() {
 
 	r.log(LogLevelInfo, "querying nsqlookupd %s", endpoint)
 
-	data, err := apiRequest(endpoint)
+	data, err := apiRequestNegotiateV1("GET", endpoint, nil)
 	if err != nil {
 		r.log(LogLevelError, "error querying nsqlookupd (%s) - %s", endpoint, err)
 		return
 	}
 
 	// {
-	//     "data": {
-	//         "channels": [],
-	//         "producers": [
-	//             {
-	//                 "broadcast_address": "jehiah-air.local",
-	//                 "http_port": 4151,
-	//                 "tcp_port": 4150
-	//             }
-	//         ],
-	//         "timestamp": 1340152173
-	//     },
-	//     "status_code": 200,
-	//     "status_txt": "OK"
+	//     "channels": [],
+	//     "producers": [
+	//         {
+	//             "broadcast_address": "jehiah-air.local",
+	//             "http_port": 4151,
+	//             "tcp_port": 4150
+	//         }
+	//     ],
+	//     "timestamp": 1340152173
 	// }
 	for i := range data.Get("producers").MustArray() {
 		producer := data.Get("producers").GetIndex(i)
