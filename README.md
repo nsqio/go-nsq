@@ -2,8 +2,9 @@
 
 `go-nsq` is the official Go package for [NSQ][nsq].
 
-NOTE: The public API was improved in [pull request #30][pr30] and is not backwards compatible with
-previous releases. **[0.3.7][legacy]** is the last stable release compatible with the legacy API.
+NOTE: The public API has been refactored in anticipation of `v1.0.0` and is not backwards compatible with
+previous releases. **[0.3.7][legacy]** is the last stable release compatible with the legacy API.  Please
+read the [UPGRADING](UPGRADING.md) guide.
 
 The latest stable release is **[0.3.7][latest_tag]**
 
