@@ -17,9 +17,6 @@ import (
 	"time"
 )
 
-// Use a private rng so as not to mess with client application's seeds
-var rng = rand.New(rand.NewSource(time.Now().UnixNano()))
-
 // Handler is the message processing interface for Consumer
 //
 // Implement this interface for handlers that return whether or not message
@@ -293,6 +290,7 @@ func validatedLookupAddr(addr string) error {
 
 // poll all known lookup servers every LookupdPollInterval
 func (r *Consumer) lookupdLoop() {
+	var rng = rand.New(rand.NewSource(time.Now().UnixNano()))
 	// add some jitter so that multiple consumers discovering the same topic,
 	// when restarted at the same time, dont all connect at once.
 	jitter := time.Duration(int64(rng.Float64() *
@@ -618,6 +616,7 @@ func (r *Consumer) inBackoffBlock() bool {
 }
 
 func (r *Consumer) rdyLoop() {
+	var rng = rand.New(rand.NewSource(time.Now().UnixNano()))
 	var backoffTimer *time.Timer
 	var backoffTimerChan <-chan time.Time
 	var backoffCounter int32
@@ -800,6 +799,7 @@ func (r *Consumer) sendRDY(c *Conn, count int64) error {
 }
 
 func (r *Consumer) redistributeRDY() {
+	var rng = rand.New(rand.NewSource(time.Now().UnixNano()))
 	if r.inBackoffBlock() {
 		return
 	}
