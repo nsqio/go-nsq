@@ -724,7 +724,7 @@ func (r *Consumer) rdyLoop() {
 				}
 			}
 		case <-redistributeTicker.C:
-			r.redistributeRDY()
+			r.redistributeRDY(rng)
 		case <-r.exitChan:
 			goto exit
 		}
@@ -798,8 +798,7 @@ func (r *Consumer) sendRDY(c *Conn, count int64) error {
 	return nil
 }
 
-func (r *Consumer) redistributeRDY() {
-	var rng = rand.New(rand.NewSource(time.Now().UnixNano()))
+func (r *Consumer) redistributeRDY(rng *rand.Rand) {
 	if r.inBackoffBlock() {
 		return
 	}
