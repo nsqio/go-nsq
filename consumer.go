@@ -330,15 +330,15 @@ func (r *Consumer) nextLookupdEndpoint() string {
 	r.lookupdQueryIndex = (r.lookupdQueryIndex + 1) % num
 
 	urlString := addr
-	if !strings.Contains(urlString, "/") {
-		urlString = fmt.Sprintf("http://%s/", addr)
+	if !strings.Contains(urlString, "://") {
+		urlString = "http://" + addr
 	}
 
 	u, err := url.Parse(urlString)
 	if err != nil {
 		panic(err)
 	}
-	if u.Path == "/" {
+	if u.Path == "/" || u.Path == "" {
 		u.Path = "/lookup"
 	}
 
