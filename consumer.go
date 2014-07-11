@@ -357,38 +357,30 @@ func (r *Consumer) queryLookupd() {
 
 	r.log(LogLevelInfo, "querying nsqlookupd %s", endpoint)
 
-	data, err := apiRequest(endpoint)
+	data, err := apiRequestNegotiateV1("GET", endpoint, nil)
 	if err != nil {
 		r.log(LogLevelError, "error querying nsqlookupd (%s) - %s", endpoint, err)
 		return
 	}
 
 	// {
-	//     "data": {
-	//         "channels": [],
-	//         "producers": [
-	//             {
-	//                 "broadcast_address": "jehiah-air.local",
-	//                 "http_port": 4151,
-	//                 "tcp_port": 4150
-	//             }
-	//         ],
-	//         "timestamp": 1340152173
-	//     },
-	//     "status_code": 200,
-	//     "status_txt": "OK"
+	//     "channels": [],
+	//     "producers": [
+	//         {
+	//             "broadcast_address": "jehiah-air.local",
+	//             "http_port": 4151,
+	//             "tcp_port": 4150
+	//         }
+	//     ],
+	//     "timestamp": 1340152173
 	// }
 	for i := range data.Get("producers").MustArray() {
 		producer := data.Get("producers").GetIndex(i)
-		address := producer.Get("address").MustString()
-		broadcastAddress, ok := producer.CheckGet("broadcast_address")
-		if ok {
-			address = broadcastAddress.MustString()
-		}
+		broadcastAddress := producer.Get("broadcast_address").MustString()
 		port := producer.Get("tcp_port").MustInt()
 
 		// make an address, start a connection
-		joined := net.JoinHostPort(address, strconv.Itoa(port))
+		joined := net.JoinHostPort(broadcastAddress, strconv.Itoa(port))
 		err = r.ConnectToNSQD(joined)
 		if err != nil && err != ErrAlreadyConnected {
 			r.log(LogLevelError, "(%s) error connecting to nsqd - %s", joined, err)
