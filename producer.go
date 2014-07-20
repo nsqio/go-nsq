@@ -25,8 +25,6 @@ type Producer struct {
 
 	responseChan  chan []byte
 	errorChan     chan []byte
-	ioErrorChan   chan error
-	heartbeatChan chan int
 	closeChan     chan int
 
 	transactionChan chan *ProducerTransaction
@@ -80,8 +78,6 @@ func NewProducer(addr string, config *Config) (*Producer, error) {
 		exitChan:        make(chan int),
 		responseChan:    make(chan []byte),
 		errorChan:       make(chan []byte),
-		ioErrorChan:     make(chan error),
-		heartbeatChan:   make(chan int),
 		closeChan:       make(chan int),
 	}
 	return p, nil
@@ -257,9 +253,6 @@ func (w *Producer) router() {
 			w.popTransaction(FrameTypeResponse, data)
 		case data := <-w.errorChan:
 			w.popTransaction(FrameTypeError, data)
-		case <-w.heartbeatChan:
-		case <-w.ioErrorChan:
-			w.close()
 		case <-w.closeChan:
 			goto exit
 		case <-w.exitChan:
@@ -337,6 +330,6 @@ func (w *Producer) log(lvl LogLevel, line string, args ...interface{}) {
 
 func (w *Producer) onConnResponse(c *Conn, data []byte) { w.responseChan <- data }
 func (w *Producer) onConnError(c *Conn, data []byte)    { w.errorChan <- data }
-func (w *Producer) onConnHeartbeat(c *Conn)             { w.heartbeatChan <- 1 }
-func (w *Producer) onConnIOError(c *Conn, err error)    { w.ioErrorChan <- err }
+func (w *Producer) onConnHeartbeat(c *Conn)             {}
+func (w *Producer) onConnIOError(c *Conn, err error)    { w.close() }
 func (w *Producer) onConnClose(c *Conn)                 { w.closeChan <- 1 }
