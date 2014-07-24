@@ -163,8 +163,10 @@ exposing an interface that follows the standard library and still provides a mea
 configure the output.
 
 In the new API, we've provided a method on `Consumer` and `Producer` called `SetLogger` that takes
-a Go standard library `log.Logger` (which can be instantiated via `log.NewLogger`) and a
-traditional log level integer `nsq.LogLevel{Debug,Info,Warning,Error}`.
+an interface compatible with the Go standard library `log.Logger` (which can be instantiated via
+`log.NewLogger`) and a traditional log level integer `nsq.LogLevel{Debug,Info,Warning,Error}`:
+
+    Output(maxdepth int, s string) error
 
 This gives the user the flexibility to control the format, destination, and verbosity while still
 conforming to standard library logging conventions.
