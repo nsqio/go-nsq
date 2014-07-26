@@ -876,7 +876,7 @@ func (r *Consumer) stopHandlers() {
 }
 
 // AddHandler sets the Handler for messages received by this Consumer. This can be called
-// multiple times to add additional handlers. Handler will have a 1:1 ration to message handling goroutines.
+// multiple times to add additional handlers. Handler will have a 1:1 ratio to message handling goroutines.
 //
 // This panics if called after connecting to NSQD or NSQ Lookupd
 //
