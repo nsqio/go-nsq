@@ -71,7 +71,7 @@ type Consumer struct {
 
 	mtx sync.RWMutex
 
-	logger *log.Logger
+	logger logger
 	logLvl LogLevel
 
 	id      int64
@@ -167,8 +167,12 @@ func (r *Consumer) conns() []*Conn {
 }
 
 // SetLogger assigns the logger to use as well as a level
-func (r *Consumer) SetLogger(logger *log.Logger, lvl LogLevel) {
-	r.logger = logger
+//
+// Logger is an interface that allows for pluaggable logging
+// This interface requires the following method to be implemented:
+//    Output(calldepth int, s string)
+func (r *Consumer) SetLogger(l logger, lvl LogLevel) {
+	r.logger = l
 	r.logLvl = lvl
 }
 
@@ -961,8 +965,6 @@ func (r *Consumer) exit() {
 }
 
 func (r *Consumer) log(lvl LogLevel, line string, args ...interface{}) {
-	var prefix string
-
 	if r.logger == nil {
 		return
 	}
@@ -971,18 +973,7 @@ func (r *Consumer) log(lvl LogLevel, line string, args ...interface{}) {
 		return
 	}
 
-	switch lvl {
-	case LogLevelDebug:
-		prefix = "DBG"
-	case LogLevelInfo:
-		prefix = "INF"
-	case LogLevelWarning:
-		prefix = "WRN"
-	case LogLevelError:
-		prefix = "ERR"
-	}
-
-	r.logger.Printf("%-4s %3d [%s/%s] %s",
-		prefix, r.id, r.topic, r.channel,
-		fmt.Sprintf(line, args...))
+	r.logger.Output(2, fmt.Sprintf("%-4s %3d [%s/%s] %s",
+		logPrefix(lvl), r.id, r.topic, r.channel,
+		fmt.Sprintf(line, args...)))
 }
