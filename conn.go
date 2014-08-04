@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"strings"
 	"sync"
@@ -66,7 +65,7 @@ type Conn struct {
 
 	delegate ConnDelegate
 
-	logger *log.Logger
+	logger logger
 	logLvl LogLevel
 	logFmt string
 
@@ -115,8 +114,12 @@ func NewConn(addr string, config *Config, delegate ConnDelegate) *Conn {
 // a single %s argument.  This is useful if you want to provide additional
 // context to the log messages that the connection will print, the default
 // is '(%s)'.
-func (c *Conn) SetLogger(logger *log.Logger, lvl LogLevel, format string) {
-	c.logger = logger
+//
+// Logger is an interface that allows for pluaggable logging
+// This interface requires the following method to be implemented:
+//    Output(calldepth int, s string)
+func (c *Conn) SetLogger(l logger, lvl LogLevel, format string) {
+	c.logger = l
 	c.logLvl = lvl
 	c.logFmt = format
 	if c.logFmt == "" {
@@ -671,8 +674,6 @@ func (c *Conn) onMessageTouch(m *Message) {
 }
 
 func (c *Conn) log(lvl LogLevel, line string, args ...interface{}) {
-	var prefix string
-
 	if c.logger == nil {
 		return
 	}
@@ -681,18 +682,7 @@ func (c *Conn) log(lvl LogLevel, line string, args ...interface{}) {
 		return
 	}
 
-	switch lvl {
-	case LogLevelDebug:
-		prefix = "DBG"
-	case LogLevelInfo:
-		prefix = "INF"
-	case LogLevelWarning:
-		prefix = "WRN"
-	case LogLevelError:
-		prefix = "ERR"
-	}
-
-	c.logger.Printf("%-4s %s %s", prefix,
+	c.logger.Output(2, fmt.Sprintf("%-4s %s %s", logPrefix(lvl),
 		fmt.Sprintf(c.logFmt, c.String()),
-		fmt.Sprintf(line, args...))
+		fmt.Sprintf(line, args...)))
 }

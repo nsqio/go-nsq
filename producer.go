@@ -20,12 +20,12 @@ type Producer struct {
 	conn   *Conn
 	config Config
 
-	logger *log.Logger
+	logger logger
 	logLvl LogLevel
 
-	responseChan  chan []byte
-	errorChan     chan []byte
-	closeChan     chan int
+	responseChan chan []byte
+	errorChan    chan []byte
+	closeChan    chan int
 
 	transactionChan chan *ProducerTransaction
 	transactions    []*ProducerTransaction
@@ -84,8 +84,12 @@ func NewProducer(addr string, config *Config) (*Producer, error) {
 }
 
 // SetLogger assigns the logger to use as well as a level
-func (w *Producer) SetLogger(logger *log.Logger, lvl LogLevel) {
-	w.logger = logger
+//
+// Logger is an interface that allows for pluaggable logging
+// This interface requires the following method to be implemented:
+//    Output(calldepth int, s string)
+func (w *Producer) SetLogger(l logger, lvl LogLevel) {
+	w.logger = l
 	w.logLvl = lvl
 }
 
@@ -304,8 +308,6 @@ func (w *Producer) transactionCleanup() {
 }
 
 func (w *Producer) log(lvl LogLevel, line string, args ...interface{}) {
-	var prefix string
-
 	if w.logger == nil {
 		return
 	}
@@ -314,18 +316,7 @@ func (w *Producer) log(lvl LogLevel, line string, args ...interface{}) {
 		return
 	}
 
-	switch lvl {
-	case LogLevelDebug:
-		prefix = "DBG"
-	case LogLevelInfo:
-		prefix = "INF"
-	case LogLevelWarning:
-		prefix = "WRN"
-	case LogLevelError:
-		prefix = "ERR"
-	}
-
-	w.logger.Printf("%-4s %3d %s", prefix, w.id, fmt.Sprintf(line, args...))
+	w.logger.Output(2, fmt.Sprintf("%-4s %3d %s", logPrefix(lvl), w.id, fmt.Sprintf(line, args...)))
 }
 
 func (w *Producer) onConnResponse(c *Conn, data []byte) { w.responseChan <- data }
