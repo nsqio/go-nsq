@@ -168,9 +168,11 @@ func (r *Consumer) conns() []*Conn {
 
 // SetLogger assigns the logger to use as well as a level
 //
-// Logger is an interface that allows for pluaggable logging
-// This interface requires the following method to be implemented:
+// The logger parameter is an interface that requires the following
+// method to be implemented (such as the the stdlib log.Logger):
+//
 //    Output(calldepth int, s string)
+//
 func (r *Consumer) SetLogger(l logger, lvl LogLevel) {
 	r.logger = l
 	r.logLvl = lvl
