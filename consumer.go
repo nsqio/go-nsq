@@ -876,7 +876,7 @@ func (r *Consumer) Stop() {
 
 func (r *Consumer) stopHandlers() {
 	r.stopHandler.Do(func() {
-		r.log(LogLevelInfo, "stopping handlers")
+		r.log(LogLevelDebug, "stopping handlers")
 		close(r.incomingMessages)
 	})
 }
