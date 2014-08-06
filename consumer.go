@@ -910,7 +910,7 @@ func (r *Consumer) AddConcurrentHandlers(handler Handler, concurrency int) {
 }
 
 func (r *Consumer) handlerLoop(handler Handler) {
-	r.log(LogLevelInfo, "starting Handler")
+	r.log(LogLevelDebug, "starting Handler")
 
 	for {
 		message, ok := <-r.incomingMessages
