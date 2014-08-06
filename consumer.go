@@ -910,7 +910,7 @@ func (r *Consumer) AddConcurrentHandlers(handler Handler, concurrency int) {
 }
 
 func (r *Consumer) handlerLoop(handler Handler) {
-	r.log(LogLevelInfo, "starting Handler")
+	r.log(LogLevelDebug, "starting Handler")
 
 	for {
 		message, ok := <-r.incomingMessages
@@ -938,7 +938,7 @@ func (r *Consumer) handlerLoop(handler Handler) {
 	}
 
 exit:
-	r.log(LogLevelInfo, "stopping Handler")
+	r.log(LogLevelDebug, "stopping Handler")
 	if atomic.AddInt32(&r.runningHandlers, -1) == 0 {
 		r.exit()
 	}
