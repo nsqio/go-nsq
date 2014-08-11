@@ -34,7 +34,7 @@ type Handler interface {
 //
 // 	consumer.AddHandler(nsq.HandlerFunc(func(m *Message) error {
 // 		// handle the message
-// 	})
+// 	}))
 type HandlerFunc func(message *Message) error
 
 // HandleMessage implements the Handler interface
