@@ -464,7 +464,7 @@ func coerceString(v interface{}) (string, error) {
 		return v.(string), nil
 	case int, int16, int32, int64, uint, uint16, uint32, uint64:
 		return fmt.Sprintf("%d", v), nil
-	case float64:
+	case float32, float64:
 		return fmt.Sprintf("%f", v), nil
 	default:
 		return fmt.Sprintf("%s", v), nil
@@ -510,6 +510,8 @@ func coerceFloat64(v interface{}) (float64, error) {
 		return float64(reflect.ValueOf(v).Int()), nil
 	case uint, uint16, uint32, uint64:
 		return float64(reflect.ValueOf(v).Uint()), nil
+	case float32:
+		return float64(v.(float32)), nil
 	case float64:
 		return v.(float64), nil
 	}
