@@ -72,8 +72,13 @@ type Config struct {
 	// Integer percentage to sample the channel (requires nsqd 0.2.25+)
 	SampleRate int32 `opt:"sample_rate" min:"0" max:"99"`
 
-	// TLS Settings
-	// use tls-root-ca-file and tls-insecure-skip-verify to set tls config options
+	// To set TLS config, use the following options:
+	//
+	// tls-root-ca-file - String path to file containing root CA
+	// tls-insecure-skip-verify - Bool indicates whether this client should verify server certificates
+	// tls-cert - String path to file containing private key for certificate
+	// tls-key - String path to file containing public key for certificate
+	//
 	TlsV1     bool        `opt:"tls_v1"`
 	TlsConfig *tls.Config `opt:"tls_config"`
 
@@ -306,11 +311,13 @@ func (h *structTagsConfig) Validate(c *Config) error {
 
 // Parsing for higher order TLS settings
 type tlsConfig struct {
+	certFile string
+	keyFile  string
 }
 
 func (t *tlsConfig) HandlesOption(c *Config, option string) bool {
 	switch option {
-	case "tls-root-ca-file", "tls-insecure-skip-verify":
+	case "tls-root-ca-file", "tls-insecure-skip-verify", "tls-cert", "tls-key":
 		return true
 	}
 	return false
@@ -322,6 +329,10 @@ func (t *tlsConfig) Set(c *Config, option string, value interface{}) error {
 	val := reflect.ValueOf(c.TlsConfig).Elem()
 
 	switch option {
+	case "tls-cert":
+		t.certFile = value.(string)
+	case "tls-key":
+		t.keyFile = value.(string)
 	case "tls-root-ca-file":
 		filename, ok := value.(string)
 		if !ok {
@@ -348,8 +359,18 @@ func (t *tlsConfig) Set(c *Config, option string, value interface{}) error {
 		dest.Set(coercedVal)
 		return nil
 	}
+
+	if t.certFile != "" && t.keyFile != "" && len(c.TlsConfig.Certificates) == 0 {
+		cert, err := tls.LoadX509KeyPair(t.certFile, t.keyFile)
+		if err != nil {
+			return err
+		}
+		c.TlsConfig.Certificates = []tls.Certificate{cert}
+	}
+
 	return fmt.Errorf("unknown option %s", option)
 }
+
 func (t *tlsConfig) Validate(c *Config) error {
 	return nil
 }
