@@ -142,7 +142,6 @@ func NewConfig() *Config {
 //
 // It returns an error for an invalid option or value.
 func (c *Config) Set(option string, value interface{}) error {
-
 	c.assertInitialized()
 
 	for _, h := range c.configHandlers {
@@ -161,7 +160,6 @@ func (c *Config) assertInitialized() {
 
 // Validate checks that all values are within specified min/max ranges
 func (c *Config) Validate() error {
-
 	c.assertInitialized()
 
 	for _, h := range c.configHandlers {
@@ -170,7 +168,6 @@ func (c *Config) Validate() error {
 		}
 	}
 	return nil
-
 }
 
 func (c *Config) setDefaults() error {
@@ -186,8 +183,7 @@ func (c *Config) setDefaults() error {
 	return nil
 }
 
-type structTagsConfig struct {
-}
+type structTagsConfig struct{}
 
 // Handle options that are listed in StructTags
 func (h *structTagsConfig) HandlesOption(c *Config, option string) bool {
@@ -322,6 +318,7 @@ func (t *tlsConfig) HandlesOption(c *Config, option string) bool {
 	}
 	return false
 }
+
 func (t *tlsConfig) Set(c *Config, option string, value interface{}) error {
 	if c.TlsConfig == nil {
 		c.TlsConfig = &tls.Config{}
