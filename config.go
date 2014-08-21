@@ -74,10 +74,10 @@ type Config struct {
 
 	// To set TLS config, use the following options:
 	//
-	// tls-root-ca-file - String path to file containing root CA
-	// tls-insecure-skip-verify - Bool indicates whether this client should verify server certificates
-	// tls-cert - String path to file containing private key for certificate
-	// tls-key - String path to file containing public key for certificate
+	// tls_root_ca_file - String path to file containing root CA
+	// tls_insecure_skip_verify - Bool indicates whether this client should verify server certificates
+	// tls_cert - String path to file containing private key for certificate
+	// tls_key - String path to file containing public key for certificate
 	//
 	TlsV1     bool        `opt:"tls_v1"`
 	TlsConfig *tls.Config `opt:"tls_config"`
@@ -143,7 +143,7 @@ func NewConfig() *Config {
 // It returns an error for an invalid option or value.
 func (c *Config) Set(option string, value interface{}) error {
 	c.assertInitialized()
-
+	option = strings.Replace(option, "-", "_", -1)
 	for _, h := range c.configHandlers {
 		if h.HandlesOption(c, option) {
 			return h.Set(c, option, value)
@@ -313,7 +313,7 @@ type tlsConfig struct {
 
 func (t *tlsConfig) HandlesOption(c *Config, option string) bool {
 	switch option {
-	case "tls-root-ca-file", "tls-insecure-skip-verify", "tls-cert", "tls-key":
+	case "tls_root_ca_file", "tls_insecure_skip_verify", "tls_cert", "tls_key":
 		return true
 	}
 	return false
@@ -326,11 +326,11 @@ func (t *tlsConfig) Set(c *Config, option string, value interface{}) error {
 	val := reflect.ValueOf(c.TlsConfig).Elem()
 
 	switch option {
-	case "tls-cert":
+	case "tls_cert":
 		t.certFile = value.(string)
-	case "tls-key":
+	case "tls_key":
 		t.keyFile = value.(string)
-	case "tls-root-ca-file":
+	case "tls_root_ca_file":
 		filename, ok := value.(string)
 		if !ok {
 			return fmt.Errorf("ERROR: %v is not a string", value)
@@ -345,7 +345,7 @@ func (t *tlsConfig) Set(c *Config, option string, value interface{}) error {
 		}
 		c.TlsConfig.ClientCAs = tlsCertPool
 		return nil
-	case "tls-insecure-skip-verify":
+	case "tls_insecure_skip_verify":
 		fieldVal := val.FieldByName("InsecureSkipVerify")
 		dest := unsafeValueOf(fieldVal)
 		coercedVal, err := coerce(value, fieldVal.Type())
