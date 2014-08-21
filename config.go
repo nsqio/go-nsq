@@ -72,8 +72,13 @@ type Config struct {
 	// Integer percentage to sample the channel (requires nsqd 0.2.25+)
 	SampleRate int32 `opt:"sample_rate" min:"0" max:"99"`
 
-	// TLS Settings
-	// use tls-root-ca-file and tls-insecure-skip-verify to set tls config options
+	// To set TLS config, use the following options:
+	//
+	// tls-root-ca-file - String path to file containing root CA
+	// tls-insecure-skip-verify - Bool indicates whether this client should verify server certificates
+	// tls-cert - String path to file containing private key for certificate
+	// tls-key - String path to file containing public key for certificate
+	//
 	TlsV1     bool        `opt:"tls_v1"`
 	TlsConfig *tls.Config `opt:"tls_config"`
 
@@ -137,7 +142,6 @@ func NewConfig() *Config {
 //
 // It returns an error for an invalid option or value.
 func (c *Config) Set(option string, value interface{}) error {
-
 	c.assertInitialized()
 
 	for _, h := range c.configHandlers {
@@ -156,7 +160,6 @@ func (c *Config) assertInitialized() {
 
 // Validate checks that all values are within specified min/max ranges
 func (c *Config) Validate() error {
-
 	c.assertInitialized()
 
 	for _, h := range c.configHandlers {
@@ -165,7 +168,6 @@ func (c *Config) Validate() error {
 		}
 	}
 	return nil
-
 }
 
 func (c *Config) setDefaults() error {
@@ -181,8 +183,7 @@ func (c *Config) setDefaults() error {
 	return nil
 }
 
-type structTagsConfig struct {
-}
+type structTagsConfig struct{}
 
 // Handle options that are listed in StructTags
 func (h *structTagsConfig) HandlesOption(c *Config, option string) bool {
@@ -306,15 +307,18 @@ func (h *structTagsConfig) Validate(c *Config) error {
 
 // Parsing for higher order TLS settings
 type tlsConfig struct {
+	certFile string
+	keyFile  string
 }
 
 func (t *tlsConfig) HandlesOption(c *Config, option string) bool {
 	switch option {
-	case "tls-root-ca-file", "tls-insecure-skip-verify":
+	case "tls-root-ca-file", "tls-insecure-skip-verify", "tls-cert", "tls-key":
 		return true
 	}
 	return false
 }
+
 func (t *tlsConfig) Set(c *Config, option string, value interface{}) error {
 	if c.TlsConfig == nil {
 		c.TlsConfig = &tls.Config{}
@@ -322,6 +326,10 @@ func (t *tlsConfig) Set(c *Config, option string, value interface{}) error {
 	val := reflect.ValueOf(c.TlsConfig).Elem()
 
 	switch option {
+	case "tls-cert":
+		t.certFile = value.(string)
+	case "tls-key":
+		t.keyFile = value.(string)
 	case "tls-root-ca-file":
 		filename, ok := value.(string)
 		if !ok {
@@ -348,8 +356,18 @@ func (t *tlsConfig) Set(c *Config, option string, value interface{}) error {
 		dest.Set(coercedVal)
 		return nil
 	}
+
+	if t.certFile != "" && t.keyFile != "" && len(c.TlsConfig.Certificates) == 0 {
+		cert, err := tls.LoadX509KeyPair(t.certFile, t.keyFile)
+		if err != nil {
+			return err
+		}
+		c.TlsConfig.Certificates = []tls.Certificate{cert}
+	}
+
 	return fmt.Errorf("unknown option %s", option)
 }
+
 func (t *tlsConfig) Validate(c *Config) error {
 	return nil
 }
@@ -443,7 +461,7 @@ func coerceString(v interface{}) (string, error) {
 		return v.(string), nil
 	case int, int16, int32, int64, uint, uint16, uint32, uint64:
 		return fmt.Sprintf("%d", v), nil
-	case float64:
+	case float32, float64:
 		return fmt.Sprintf("%f", v), nil
 	default:
 		return fmt.Sprintf("%s", v), nil
@@ -489,6 +507,8 @@ func coerceFloat64(v interface{}) (float64, error) {
 		return float64(reflect.ValueOf(v).Int()), nil
 	case uint, uint16, uint32, uint64:
 		return float64(reflect.ValueOf(v).Uint()), nil
+	case float32:
+		return float64(v.(float32)), nil
 	case float64:
 		return v.(float64), nil
 	}
