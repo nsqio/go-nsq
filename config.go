@@ -76,8 +76,8 @@ type Config struct {
 	//
 	// tls_root_ca_file - String path to file containing root CA
 	// tls_insecure_skip_verify - Bool indicates whether this client should verify server certificates
-	// tls_cert - String path to file containing private key for certificate
-	// tls_key - String path to file containing public key for certificate
+	// tls_cert - String path to file containing public key for certificate
+	// tls_key - String path to file containing private key for certificate
 	//
 	TlsV1     bool        `opt:"tls_v1"`
 	TlsConfig *tls.Config `opt:"tls_config"`
@@ -343,7 +343,7 @@ func (t *tlsConfig) Set(c *Config, option string, value interface{}) error {
 		if !tlsCertPool.AppendCertsFromPEM(ca_cert_file) {
 			return fmt.Errorf("ERROR: failed to append certificates from Certificate Authority file")
 		}
-		c.TlsConfig.ClientCAs = tlsCertPool
+		c.TlsConfig.RootCAs = tlsCertPool
 		return nil
 	case "tls_insecure_skip_verify":
 		fieldVal := val.FieldByName("InsecureSkipVerify")
