@@ -326,21 +326,31 @@ func (t *tlsConfig) Set(c *Config, option string, value interface{}) error {
 	val := reflect.ValueOf(c.TlsConfig).Elem()
 
 	switch option {
-	case "tls_cert":
-		t.certFile = value.(string)
-	case "tls_key":
-		t.keyFile = value.(string)
+	case "tls_cert", "tls_key":
+		if option == "tls_cert" {
+			t.certFile = value.(string)
+		} else {
+			t.keyFile = value.(string)
+		}
+		if t.certFile != "" && t.keyFile != "" && len(c.TlsConfig.Certificates) == 0 {
+			cert, err := tls.LoadX509KeyPair(t.certFile, t.keyFile)
+			if err != nil {
+				return err
+			}
+			c.TlsConfig.Certificates = []tls.Certificate{cert}
+		}
+		return nil
 	case "tls_root_ca_file":
 		filename, ok := value.(string)
 		if !ok {
 			return fmt.Errorf("ERROR: %v is not a string", value)
 		}
 		tlsCertPool := x509.NewCertPool()
-		ca_cert_file, err := ioutil.ReadFile(filename)
+		caCertFile, err := ioutil.ReadFile(filename)
 		if err != nil {
 			return fmt.Errorf("ERROR: failed to read custom Certificate Authority file %s", err)
 		}
-		if !tlsCertPool.AppendCertsFromPEM(ca_cert_file) {
+		if !tlsCertPool.AppendCertsFromPEM(caCertFile) {
 			return fmt.Errorf("ERROR: failed to append certificates from Certificate Authority file")
 		}
 		c.TlsConfig.RootCAs = tlsCertPool
@@ -355,14 +365,6 @@ func (t *tlsConfig) Set(c *Config, option string, value interface{}) error {
 		}
 		dest.Set(coercedVal)
 		return nil
-	}
-
-	if t.certFile != "" && t.keyFile != "" && len(c.TlsConfig.Certificates) == 0 {
-		cert, err := tls.LoadX509KeyPair(t.certFile, t.keyFile)
-		if err != nil {
-			return err
-		}
-		c.TlsConfig.Certificates = []tls.Certificate{cert}
 	}
 
 	return fmt.Errorf("unknown option %s", option)
