@@ -8,7 +8,9 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -62,55 +64,99 @@ func SendMessage(t *testing.T, port int, topic string, method string, body []byt
 }
 
 func TestConsumer(t *testing.T) {
-	consumerTest(t, false, false, false)
+	consumerTest(t, nil)
 }
 
 func TestConsumerTLS(t *testing.T) {
-	consumerTest(t, false, false, true)
+	consumerTest(t, func(c *Config) {
+		c.TlsV1 = true
+		c.TlsConfig = &tls.Config{
+			InsecureSkipVerify: true,
+		}
+	})
 }
 
 func TestConsumerDeflate(t *testing.T) {
-	consumerTest(t, true, false, false)
+	consumerTest(t, func(c *Config) {
+		c.Deflate = true
+	})
 }
 
 func TestConsumerSnappy(t *testing.T) {
-	consumerTest(t, false, true, false)
+	consumerTest(t, func(c *Config) {
+		c.Snappy = true
+	})
 }
 
 func TestConsumerTLSDeflate(t *testing.T) {
-	consumerTest(t, true, false, true)
+	consumerTest(t, func(c *Config) {
+		c.TlsV1 = true
+		c.TlsConfig = &tls.Config{
+			InsecureSkipVerify: true,
+		}
+		c.Deflate = true
+	})
 }
 
 func TestConsumerTLSSnappy(t *testing.T) {
-	consumerTest(t, false, true, true)
+	consumerTest(t, func(c *Config) {
+		c.TlsV1 = true
+		c.TlsConfig = &tls.Config{
+			InsecureSkipVerify: true,
+		}
+		c.Snappy = true
+	})
 }
 
-func consumerTest(t *testing.T, deflate bool, snappy bool, tlsv1 bool) {
-
-	topicName := "rdr_test"
-	if deflate {
-		topicName = topicName + "_deflate"
-	} else if snappy {
-		topicName = topicName + "_snappy"
+func TestConsumerTLSClientCert(t *testing.T) {
+	envDl := os.Getenv("NSQ_DOWNLOAD")
+	if strings.HasPrefix(envDl, "nsq-0.2.24") || strings.HasPrefix(envDl, "nsq-0.2.27") {
+		t.Log("skipping due to older nsqd")
+		return
 	}
-	if tlsv1 {
-		topicName = topicName + "_tls"
-	}
-	topicName = topicName + strconv.Itoa(int(time.Now().Unix()))
+	cert, _ := tls.LoadX509KeyPair("./test/client.pem", "./test/client.key")
+	consumerTest(t, func(c *Config) {
+		c.TlsV1 = true
+		c.TlsConfig = &tls.Config{
+			Certificates:       []tls.Certificate{cert},
+			InsecureSkipVerify: true,
+		}
+	})
+}
 
+func TestConsumerTLSClientCertViaSet(t *testing.T) {
+	envDl := os.Getenv("NSQ_DOWNLOAD")
+	if strings.HasPrefix(envDl, "nsq-0.2.24") || strings.HasPrefix(envDl, "nsq-0.2.27") {
+		t.Log("skipping due to older nsqd")
+		return
+	}
+	consumerTest(t, func(c *Config) {
+		c.Set("tls_v1", true)
+		c.Set("tls_cert", "./test/client.pem")
+		c.Set("tls_key", "./test/client.key")
+		c.Set("tls_insecure_skip_verify", true)
+	})
+}
+
+func consumerTest(t *testing.T, cb func(c *Config)) {
 	config := NewConfig()
 	// so that the test can simulate reaching max requeues and a call to LogFailedMessage
 	config.DefaultRequeueDelay = 0
 	// so that the test wont timeout from backing off
 	config.MaxBackoffDuration = time.Millisecond * 50
-	config.Deflate = deflate
-	config.Snappy = snappy
-	config.TlsV1 = tlsv1
-	if tlsv1 {
-		config.TlsConfig = &tls.Config{
-			InsecureSkipVerify: true,
-		}
+	if cb != nil {
+		cb(config)
 	}
+	topicName := "rdr_test"
+	if config.Deflate {
+		topicName = topicName + "_deflate"
+	} else if config.Snappy {
+		topicName = topicName + "_snappy"
+	}
+	if config.TlsV1 {
+		topicName = topicName + "_tls"
+	}
+	topicName = topicName + strconv.Itoa(int(time.Now().Unix()))
 	q, _ := NewConsumer(topicName, "ch", config)
 	q.SetLogger(nullLogger, LogLevelInfo)
 
@@ -128,12 +174,12 @@ func consumerTest(t *testing.T, deflate bool, snappy bool, tlsv1 bool) {
 	addr := "127.0.0.1:4150"
 	err := q.ConnectToNSQD(addr)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 
 	err = q.ConnectToNSQD(addr)
 	if err == nil {
-		t.Fatalf("should not be able to connect to the same NSQ twice")
+		t.Fatal("should not be able to connect to the same NSQ twice")
 	}
 
 	<-q.StopChan
