@@ -65,7 +65,7 @@ type Conn struct {
 
 	delegate ConnDelegate
 
-	logger logger
+	logger Logger
 	logLvl LogLevel
 	logFmt string
 
@@ -120,7 +120,7 @@ func NewConn(addr string, config *Config, delegate ConnDelegate) *Conn {
 //
 //    Output(calldepth int, s string)
 //
-func (c *Conn) SetLogger(l logger, lvl LogLevel, format string) {
+func (c *Conn) SetLogger(l Logger, lvl LogLevel, format string) {
 	c.logger = l
 	c.logLvl = lvl
 	c.logFmt = format

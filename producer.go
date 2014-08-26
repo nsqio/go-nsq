@@ -20,7 +20,7 @@ type Producer struct {
 	conn   *Conn
 	config Config
 
-	logger logger
+	logger Logger
 	logLvl LogLevel
 
 	responseChan chan []byte
@@ -90,7 +90,7 @@ func NewProducer(addr string, config *Config) (*Producer, error) {
 //
 //    Output(calldepth int, s string)
 //
-func (w *Producer) SetLogger(l logger, lvl LogLevel) {
+func (w *Producer) SetLogger(l Logger, lvl LogLevel) {
 	w.logger = l
 	w.logLvl = lvl
 }
