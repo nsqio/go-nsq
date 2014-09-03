@@ -214,17 +214,15 @@ func (w *Producer) connect() error {
 
 	w.log(LogLevelInfo, "(%s) connecting to nsqd", w.addr)
 
-	conn := NewConn(w.addr, &w.config, &producerConnDelegate{w})
-	conn.SetLogger(w.logger, w.logLvl, fmt.Sprintf("%3d (%%s)", w.id))
-
-	_, err := conn.Connect()
+	w.conn = NewConn(w.addr, &w.config, &producerConnDelegate{w})
+	w.conn.SetLogger(w.logger, w.logLvl, fmt.Sprintf("%3d (%%s)", w.id))
+	_, err := w.conn.Connect()
 	if err != nil {
-		conn.Close()
+		w.conn.Close()
 		w.log(LogLevelError, "(%s) error connecting to nsqd - %s", w.addr, err)
 		atomic.StoreInt32(&w.state, StateInit)
 		return err
 	}
-	w.conn = conn
 
 	w.wg.Add(1)
 	go w.router()
