@@ -74,6 +74,7 @@ type Config struct {
 
 	// To set TLS config, use the following options:
 	//
+	// tls_v1 - Bool enable TLS negotiation
 	// tls_root_ca_file - String path to file containing root CA
 	// tls_insecure_skip_verify - Bool indicates whether this client should verify server certificates
 	// tls_cert - String path to file containing public key for certificate
