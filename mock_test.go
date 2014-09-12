@@ -242,17 +242,17 @@ func TestConsumerBackoff(t *testing.T) {
 		fmt.Sprintf("FIN %s", msgIDGood),
 		fmt.Sprintf("FIN %s", msgIDGood),
 		"RDY 5",
+		"RDY 0",
 		fmt.Sprintf("REQ %s 0", msgIDBad),
-		"RDY 0",
 		"RDY 1",
+		"RDY 0",
 		fmt.Sprintf("REQ %s 0", msgIDBad),
-		"RDY 0",
 		"RDY 1",
-		fmt.Sprintf("FIN %s", msgIDGood),
 		"RDY 0",
-		"RDY 1",
 		fmt.Sprintf("FIN %s", msgIDGood),
+		"RDY 1",
 		"RDY 5",
+		fmt.Sprintf("FIN %s", msgIDGood),
 	}
 	if len(n.got) != len(expected) {
 		t.Fatalf("we got %d commands != %d expected", len(n.got), len(expected))

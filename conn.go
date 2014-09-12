@@ -537,13 +537,6 @@ func (c *Conn) writeLoop() {
 			// Decrement this here so it is correct even if we can't respond to nsqd
 			msgsInFlight := atomic.AddInt64(&c.messagesInFlight, -1)
 
-			err := c.WriteCommand(resp.cmd)
-			if err != nil {
-				c.log(LogLevelError, "error sending command %s - %s", resp.cmd, err)
-				c.close()
-				continue
-			}
-
 			if resp.success {
 				c.log(LogLevelDebug, "FIN %s", resp.msg.ID)
 				c.delegate.OnMessageFinished(c, resp.msg)
@@ -556,6 +549,13 @@ func (c *Conn) writeLoop() {
 				if resp.backoff {
 					c.delegate.OnBackoff(c)
 				}
+			}
+
+			err := c.WriteCommand(resp.cmd)
+			if err != nil {
+				c.log(LogLevelError, "error sending command %s - %s", resp.cmd, err)
+				c.close()
+				continue
 			}
 
 			if msgsInFlight == 0 &&
