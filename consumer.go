@@ -15,6 +15,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/bitly/go-simplejson"
 )
 
 // Handler is the message processing interface for Consumer
@@ -40,6 +42,13 @@ type HandlerFunc func(message *Message) error
 // HandleMessage implements the Handler interface
 func (h HandlerFunc) HandleMessage(m *Message) error {
 	return h(m)
+}
+
+// DiscoveryFilter interface
+// one of the interfaces an argument to setBehaviorDelegate() can satisfy
+// for filtering the nsqds returned from discovery via nsqlookupd
+type DiscoveryFilter interface {
+	Filter([]string) []string
 }
 
 // FailedMessageLogger is an interface that can be implemented by handlers that wish
@@ -73,6 +82,8 @@ type Consumer struct {
 
 	logger logger
 	logLvl LogLevel
+
+	behaviorDelegate interface{}
 
 	id      int64
 	topic   string
@@ -178,6 +189,19 @@ func (r *Consumer) conns() []*Conn {
 func (r *Consumer) SetLogger(l logger, lvl LogLevel) {
 	r.logger = l
 	r.logLvl = lvl
+}
+
+func (r *Consumer) SetBehaviorDelegate(cb interface{}) {
+	matched := false
+
+	if _, ok := cb.(DiscoveryFilter); ok {
+		matched = true
+	}
+
+	if !matched {
+		panic("behavior delegate does not have any recognized methods")
+	}
+	r.behaviorDelegate = cb
 }
 
 // perConnMaxInFlight calculates the per-connection max-in-flight count.
@@ -381,16 +405,23 @@ func (r *Consumer) queryLookupd() {
 	//     ],
 	//     "timestamp": 1340152173
 	// }
-	for i := range data.Get("producers").MustArray() {
-		producer := data.Get("producers").GetIndex(i)
+	producersArray := data.Get("Producers").MustArray()
+	nsqdAddrs := make([]string, len(producersArray))
+	for _, element := range producersArray {
+		producer := element.(*simplejson.Json)
 		broadcastAddress := producer.Get("broadcast_address").MustString()
 		port := producer.Get("tcp_port").MustInt()
-
-		// make an address, start a connection
 		joined := net.JoinHostPort(broadcastAddress, strconv.Itoa(port))
-		err = r.ConnectToNSQD(joined)
+		nsqdAddrs = append(nsqdAddrs, joined)
+	}
+	// apply filter
+	if discoveryFilter, ok := r.behaviorDelegate.(DiscoveryFilter); ok {
+		nsqdAddrs = discoveryFilter.Filter(nsqdAddrs)
+	}
+	for _, addr := range nsqdAddrs {
+		err = r.ConnectToNSQD(addr)
 		if err != nil && err != ErrAlreadyConnected {
-			r.log(LogLevelError, "(%s) error connecting to nsqd - %s", joined, err)
+			r.log(LogLevelError, "(%s) error connecting to nsqd - %s", addr, err)
 			continue
 		}
 	}
