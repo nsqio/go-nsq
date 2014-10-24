@@ -280,10 +280,18 @@ func (c *Conn) identify() (*IdentifyResponse, error) {
 	ci["deflate_level"] = c.config.DeflateLevel
 	ci["snappy"] = c.config.Snappy
 	ci["feature_negotiation"] = true
-	ci["heartbeat_interval"] = int64(c.config.HeartbeatInterval / time.Millisecond)
+	if c.config.HeartbeatInterval == -1 {
+		ci["heartbeat_interval"] = -1
+	} else {
+		ci["heartbeat_interval"] = int64(c.config.HeartbeatInterval / time.Millisecond)
+	}
 	ci["sample_rate"] = c.config.SampleRate
 	ci["output_buffer_size"] = c.config.OutputBufferSize
-	ci["output_buffer_timeout"] = int64(c.config.OutputBufferTimeout / time.Millisecond)
+	if c.config.OutputBufferTimeout == -1 {
+		ci["output_buffer_timeout"] = -1
+	} else {
+		ci["output_buffer_timeout"] = int64(c.config.OutputBufferTimeout / time.Millisecond)
+	}
 	ci["msg_timeout"] = int64(c.config.MsgTimeout / time.Millisecond)
 	cmd, err := Identify(ci)
 	if err != nil {
