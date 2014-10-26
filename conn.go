@@ -458,6 +458,7 @@ func (c *Conn) auth(secret string) error {
 }
 
 func (c *Conn) readLoop() {
+	delegate := &connMessageDelegate{c}
 	for {
 		if atomic.LoadInt32(&c.closeFlag) == 1 {
 			goto exit
@@ -494,7 +495,7 @@ func (c *Conn) readLoop() {
 				c.delegate.OnIOError(c, err)
 				goto exit
 			}
-			msg.Delegate = &connMessageDelegate{c}
+			msg.Delegate = delegate
 
 			atomic.AddInt64(&c.rdyCount, -1)
 			atomic.AddInt64(&c.messagesInFlight, 1)
