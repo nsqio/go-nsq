@@ -15,8 +15,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/bitly/go-simplejson"
 )
 
 // Handler is the message processing interface for Consumer
@@ -201,6 +199,7 @@ func (r *Consumer) SetBehaviorDelegate(cb interface{}) {
 	if !matched {
 		panic("behavior delegate does not have any recognized methods")
 	}
+
 	r.behaviorDelegate = cb
 }
 
@@ -405,10 +404,9 @@ func (r *Consumer) queryLookupd() {
 	//     ],
 	//     "timestamp": 1340152173
 	// }
-	producersArray := data.Get("Producers").MustArray()
-	nsqdAddrs := make([]string, len(producersArray))
-	for _, element := range producersArray {
-		producer := element.(*simplejson.Json)
+	nsqdAddrs := make([]string, 0)
+	for i := range data.Get("producers").MustArray() {
+		producer := data.Get("producers").GetIndex(i)
 		broadcastAddress := producer.Get("broadcast_address").MustString()
 		port := producer.Get("tcp_port").MustInt()
 		joined := net.JoinHostPort(broadcastAddress, strconv.Itoa(port))
