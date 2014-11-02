@@ -158,7 +158,7 @@ func consumerTest(t *testing.T, cb func(c *Config)) {
 	}
 	topicName = topicName + strconv.Itoa(int(time.Now().Unix()))
 	q, _ := NewConsumer(topicName, "ch", config)
-	q.SetLogger(nullLogger, LogLevelInfo)
+	// q.SetLogger(nullLogger, LogLevelInfo)
 
 	h := &MyTestHandler{
 		t: t,
@@ -180,6 +180,21 @@ func consumerTest(t *testing.T, cb func(c *Config)) {
 	err = q.ConnectToNSQD(addr)
 	if err == nil {
 		t.Fatal("should not be able to connect to the same NSQ twice")
+	}
+
+	err = q.DisconnectFromNSQD("1.2.3.4:4150")
+	if err == nil {
+		t.Fatal("should not be able to disconnect from an unknown nsqd")
+	}
+
+	err = q.ConnectToNSQD("1.2.3.4:4150")
+	if err == nil {
+		t.Fatal("should not be able to connect to non-existent nsqd")
+	}
+
+	err = q.DisconnectFromNSQD("1.2.3.4:4150")
+	if err != nil {
+		t.Fatal("should be able to disconnect from an nsqd - " + err.Error())
 	}
 
 	<-q.StopChan
