@@ -1,5 +1,19 @@
 ## go-nsq Change Log
 
+### 1.0.1 - 2014-11-09
+
+**Upgrading from 1.0.0**: There are no backward incompatible changes functionally, however this
+release no longer compiles with Go `1.0.x`.
+
+ * #89 - don't spam connection teardown cleanup messages
+ * #91 - add consumer `DisconnectFrom*`
+ * #87 - allow `heartbeat_interval` and `output_buffer_timeout` to be disabled
+ * #86 - pluggable `nsqlookupd` behaviors
+ * #83 - send `RDY` before `FIN`/`REQ` (forwards compatibility with bitly/nsq#404)
+ * #82 - fix panic when conn isn't assigned
+ * #75/#76 - minor config related bug fixes
+ * #75/#77/#78 - add `tls-cert` and `tls-key` config options
+
 ### 1.0.0 - 2014-08-11
 
 **Upgrading from 0.3.7**: The public API was significantly refactored and is not backwards
