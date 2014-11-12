@@ -42,8 +42,7 @@ func (h HandlerFunc) HandleMessage(m *Message) error {
 	return h(m)
 }
 
-// DiscoveryFilter interface
-// one of the interfaces an argument to setBehaviorDelegate() can satisfy
+// DiscoveryFilter is an interface accepted by `SetBehaviorDelegate()`
 // for filtering the nsqds returned from discovery via nsqlookupd
 type DiscoveryFilter interface {
 	Filter([]string) []string
@@ -191,6 +190,12 @@ func (r *Consumer) SetLogger(l logger, lvl LogLevel) {
 	r.logLvl = lvl
 }
 
+// SetBehaviorDelegate takes a type implementing one or more
+// of the following interfaces that modify the behavior
+// of the `Consumer`:
+//
+//    DiscoveryFilter
+//
 func (r *Consumer) SetBehaviorDelegate(cb interface{}) {
 	matched := false
 
@@ -527,6 +532,8 @@ func indexOf(n string, h []string) int {
 	return -1
 }
 
+// DisconnectFromNSQD closes the connection to and removes the specified
+// `nsqd` address from the list
 func (r *Consumer) DisconnectFromNSQD(addr string) error {
 	r.mtx.Lock()
 	defer r.mtx.Unlock()
@@ -551,6 +558,8 @@ func (r *Consumer) DisconnectFromNSQD(addr string) error {
 	return nil
 }
 
+// DisconnectFromNSQLookupd removes the specified `nsqlookupd` address
+// from the list used for periodic discovery.
 func (r *Consumer) DisconnectFromNSQLookupd(addr string) error {
 	r.mtx.Lock()
 	defer r.mtx.Unlock()
