@@ -55,6 +55,15 @@ type FailedMessageLogger interface {
 	LogFailedMessage(message *Message)
 }
 
+// ConsumerStats represents a snapshot of the state of a Consumer's connections and the messages
+// it has seen
+type ConsumerStats struct {
+	MessagesReceived uint64
+	MessagesFinished uint64
+	MessagesRequeued uint64
+	Connections      int
+}
+
 var instCount int64
 
 // Consumer is a high-level type to consume from NSQ.
@@ -166,6 +175,16 @@ func NewConsumer(topic string, channel string, config *Config) (*Consumer, error
 	r.wg.Add(1)
 	go r.rdyLoop()
 	return r, nil
+}
+
+// Stats retrieves the current connection and message statistics for a Consumer
+func (r *Consumer) Stats() *ConsumerStats {
+	return &ConsumerStats{
+		MessagesReceived: atomic.LoadUint64(&r.messagesReceived),
+		MessagesFinished: atomic.LoadUint64(&r.messagesFinished),
+		MessagesRequeued: atomic.LoadUint64(&r.messagesRequeued),
+		Connections:      len(r.conns()),
+	}
 }
 
 func (r *Consumer) conns() []*Conn {
