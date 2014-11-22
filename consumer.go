@@ -954,7 +954,12 @@ func (r *Consumer) Stop() {
 		}
 
 		time.AfterFunc(time.Second*30, func() {
-			r.stopHandlers()
+			// if we've waited this long handlers are blocked on processing messages
+			// so we can't just stopHandlers (if any adtl. messages were pending processing
+			// we would cause a panic on channel close)
+			//
+			// instead, we just bypass handler closing and skip to the final exit
+			r.exit()
 		})
 	}
 }
