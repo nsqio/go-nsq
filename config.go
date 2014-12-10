@@ -79,6 +79,7 @@ type Config struct {
 	// tls_insecure_skip_verify - Bool indicates whether this client should verify server certificates
 	// tls_cert - String path to file containing public key for certificate
 	// tls_key - String path to file containing private key for certificate
+	// tls_min_version - String indicating the minimum version of tls acceptable ('ssl30', 'tls10', 'tls11', 'tls12')
 	//
 	TlsV1     bool        `opt:"tls_v1"`
 	TlsConfig *tls.Config `opt:"tls_config"`
@@ -314,7 +315,7 @@ type tlsConfig struct {
 
 func (t *tlsConfig) HandlesOption(c *Config, option string) bool {
 	switch option {
-	case "tls_root_ca_file", "tls_insecure_skip_verify", "tls_cert", "tls_key":
+	case "tls_root_ca_file", "tls_insecure_skip_verify", "tls_cert", "tls_key", "tls_min_version":
 		return true
 	}
 	return false
@@ -365,6 +366,24 @@ func (t *tlsConfig) Set(c *Config, option string, value interface{}) error {
 				option, value, err)
 		}
 		dest.Set(coercedVal)
+		return nil
+	case "tls_min_version":
+		version, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("ERROR: %v is not a string", value)
+		}
+		switch version {
+		case "ssl30":
+			c.TlsConfig.MinVersion = tls.VersionSSL30
+		case "tls10":
+			c.TlsConfig.MinVersion = tls.VersionTLS10
+		case "tls11":
+			c.TlsConfig.MinVersion = tls.VersionTLS11
+		case "tls12":
+			c.TlsConfig.MinVersion = tls.VersionTLS12
+		default:
+			return fmt.Errorf("ERROR: %v is not a tls version", value)
+		}
 		return nil
 	}
 
