@@ -23,6 +23,8 @@ type Message struct {
 	Timestamp int64
 	Attempts  uint16
 
+	NSQDAddress string
+
 	Delegate MessageDelegate
 
 	autoResponseDisabled int32
