@@ -78,7 +78,6 @@ func NewProducer(addr string, config *Config) (*Producer, error) {
 		exitChan:        make(chan int),
 		responseChan:    make(chan []byte),
 		errorChan:       make(chan []byte),
-		closeChan:       make(chan int),
 	}
 	return p, nil
 }
@@ -223,7 +222,7 @@ func (w *Producer) connect() error {
 		atomic.StoreInt32(&w.state, StateInit)
 		return err
 	}
-
+	w.closeChan = make(chan int)
 	w.wg.Add(1)
 	go w.router()
 
@@ -323,4 +322,8 @@ func (w *Producer) onConnResponse(c *Conn, data []byte) { w.responseChan <- data
 func (w *Producer) onConnError(c *Conn, data []byte)    { w.errorChan <- data }
 func (w *Producer) onConnHeartbeat(c *Conn)             {}
 func (w *Producer) onConnIOError(c *Conn, err error)    { w.close() }
-func (w *Producer) onConnClose(c *Conn)                 { w.closeChan <- 1 }
+func (w *Producer) onConnClose(c *Conn) {
+	w.guard.Lock()
+	defer w.guard.Unlock()
+	close(w.closeChan)
+}
