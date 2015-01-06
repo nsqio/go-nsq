@@ -123,6 +123,7 @@ type Consumer struct {
 	stopFlag        int32
 	connectedFlag   int32
 	stopHandler     sync.Once
+	exitHandler     sync.Once
 
 	// read from this channel to block until consumer is cleanly stopped
 	StopChan chan int
@@ -1079,9 +1080,11 @@ func (r *Consumer) shouldFailMessage(message *Message, handler interface{}) bool
 }
 
 func (r *Consumer) exit() {
-	close(r.exitChan)
-	r.wg.Wait()
-	close(r.StopChan)
+	r.exitHandler.Do(func() {
+		close(r.exitChan)
+		r.wg.Wait()
+		close(r.StopChan)
+	})
 }
 
 func (r *Consumer) log(lvl LogLevel, line string, args ...interface{}) {
