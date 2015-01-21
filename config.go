@@ -79,7 +79,7 @@ type Config struct {
 	// tls_insecure_skip_verify - Bool indicates whether this client should verify server certificates
 	// tls_cert - String path to file containing public key for certificate
 	// tls_key - String path to file containing private key for certificate
-	// tls_min_version - String indicating the minimum version of tls acceptable ('ssl30', 'tls10', 'tls11', 'tls12')
+	// tls_min_version - String indicating the minimum version of tls acceptable ('ssl3.0', 'tls1.0', 'tls1.1', 'tls1.2')
 	//
 	TlsV1     bool        `opt:"tls_v1"`
 	TlsConfig *tls.Config `opt:"tls_config"`
@@ -323,7 +323,10 @@ func (t *tlsConfig) HandlesOption(c *Config, option string) bool {
 
 func (t *tlsConfig) Set(c *Config, option string, value interface{}) error {
 	if c.TlsConfig == nil {
-		c.TlsConfig = &tls.Config{}
+		c.TlsConfig = &tls.Config{
+			MinVersion: tls.VersionTLS10,
+			MaxVersion: tls.VersionTLS12, // enable TLS_FALLBACK_SCSV prior to Go 1.5: https://go-review.googlesource.com/#/c/1776/
+		}
 	}
 	val := reflect.ValueOf(c.TlsConfig).Elem()
 
@@ -373,13 +376,13 @@ func (t *tlsConfig) Set(c *Config, option string, value interface{}) error {
 			return fmt.Errorf("ERROR: %v is not a string", value)
 		}
 		switch version {
-		case "ssl30":
+		case "ssl3.0":
 			c.TlsConfig.MinVersion = tls.VersionSSL30
-		case "tls10":
+		case "tls1.0":
 			c.TlsConfig.MinVersion = tls.VersionTLS10
-		case "tls11":
+		case "tls1.1":
 			c.TlsConfig.MinVersion = tls.VersionTLS11
-		case "tls12":
+		case "tls1.2":
 			c.TlsConfig.MinVersion = tls.VersionTLS12
 		default:
 			return fmt.Errorf("ERROR: %v is not a tls version", value)

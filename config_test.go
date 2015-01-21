@@ -20,10 +20,10 @@ func TestConfigSet(t *testing.T) {
 	if c.TlsConfig.InsecureSkipVerify != true {
 		t.Errorf("Error setting `tls-insecure-skip-verify` config: %v", c.TlsConfig)
 	}
-	if err := c.Set("tls-min-version", "tls12"); err != nil {
+	if err := c.Set("tls-min-version", "tls1.2"); err != nil {
 		t.Errorf("Error setting `tls-min-version` config: %v", err)
 	}
-	if err := c.Set("tls-min-version", "tls13"); err == nil {
+	if err := c.Set("tls-min-version", "tls1.3"); err == nil {
 		t.Error("No error when setting `tls-min-version` to an invalid value")
 	}
 }
