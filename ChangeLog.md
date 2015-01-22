@@ -1,5 +1,17 @@
 ## go-nsq Change Log
 
+### 1.0.2 - 2015-01-21
+
+**Upgrading from 1.0.1**: here are no backward incompatible changes.
+
+ * #102 - TLS min/max config defaults (thanks @twmb)
+ * #99 - fix `Consumer.Stop()` race and `Producer.Stop()` deadlock (thanks @tylertreat)
+ * #92 - expose `Message.NSQDAddress`
+ * #95 - cleanup panic during `Consumer.Stop()` if handlers are deadlocked
+ * #98 - add `tls-min-version` option (thanks @twmb)
+ * #93 - expose a way to get `Consumer` runtime stats (thanks @dcarney)
+ * #94 - allow `#ephemeral` topic names (thanks @jamesgroat)
+
 ### 1.0.1 - 2014-11-09
 
 **Upgrading from 1.0.0**: There are no backward incompatible changes functionally, however this
