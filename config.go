@@ -32,7 +32,7 @@ type defaultsHandler interface {
 // After Config is passed into a high-level type (like Consumer, Producer, etc.) the values are no
 // longer mutable (they are copied).
 //
-// Use Set(key string, value interface{}) as an alternate way to set parameters
+// Use Set(option string, value interface{}) as an alternate way to set parameters
 type Config struct {
 	initialized bool
 
