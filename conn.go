@@ -65,9 +65,10 @@ type Conn struct {
 
 	delegate ConnDelegate
 
-	logger logger
-	logLvl LogLevel
-	logFmt string
+	logger   logger
+	logLvl   LogLevel
+	logFmt   string
+	logGuard sync.RWMutex
 
 	r io.Reader
 	w io.Writer
@@ -121,12 +122,22 @@ func NewConn(addr string, config *Config, delegate ConnDelegate) *Conn {
 //    Output(calldepth int, s string)
 //
 func (c *Conn) SetLogger(l logger, lvl LogLevel, format string) {
+	c.logGuard.Lock()
+	defer c.logGuard.Unlock()
+
 	c.logger = l
 	c.logLvl = lvl
 	c.logFmt = format
 	if c.logFmt == "" {
 		c.logFmt = "(%s)"
 	}
+}
+
+func (c *Conn) getLogger() (logger, LogLevel, string) {
+	c.logGuard.RLock()
+	defer c.logGuard.RUnlock()
+
+	return c.logger, c.logLvl, c.logFmt
 }
 
 // Connect dials and bootstraps the nsqd connection
@@ -693,15 +704,17 @@ func (c *Conn) onMessageTouch(m *Message) {
 }
 
 func (c *Conn) log(lvl LogLevel, line string, args ...interface{}) {
-	if c.logger == nil {
+	logger, logLvl, logFmt := c.getLogger()
+
+	if logger == nil {
 		return
 	}
 
-	if c.logLvl > lvl {
+	if logLvl > lvl {
 		return
 	}
 
-	c.logger.Output(2, fmt.Sprintf("%-4s %s %s", logPrefix(lvl),
-		fmt.Sprintf(c.logFmt, c.String()),
+	logger.Output(2, fmt.Sprintf("%-4s %s %s", logPrefix(lvl),
+		fmt.Sprintf(logFmt, c.String()),
 		fmt.Sprintf(line, args...)))
 }
