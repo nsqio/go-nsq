@@ -381,6 +381,9 @@ exit:
 // keeping track of which one was last used
 func (r *Consumer) nextLookupdEndpoint() string {
 	r.mtx.RLock()
+	if r.lookupdQueryIndex >= len(r.lookupdHTTPAddrs) {
+		r.lookupdQueryIndex = 0
+	}
 	addr := r.lookupdHTTPAddrs[r.lookupdQueryIndex]
 	num := len(r.lookupdHTTPAddrs)
 	r.mtx.RUnlock()
