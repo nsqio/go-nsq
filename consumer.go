@@ -86,7 +86,7 @@ type Consumer struct {
 
 	mtx sync.RWMutex
 
-	logger logger
+	logger Logger
 	logLvl LogLevel
 
 	behaviorDelegate interface{}
@@ -205,7 +205,7 @@ func (r *Consumer) conns() []*Conn {
 //
 //    Output(calldepth int, s string)
 //
-func (r *Consumer) SetLogger(l logger, lvl LogLevel) {
+func (r *Consumer) SetLogger(l Logger, lvl LogLevel) {
 	r.logger = l
 	r.logLvl = lvl
 }

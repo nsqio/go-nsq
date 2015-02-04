@@ -5,7 +5,7 @@ import "time"
 // LogLevel specifies the severity of a given log message
 type LogLevel int
 
-type logger interface {
+type Logger interface {
 	Output(calldepth int, s string) error
 }
 
