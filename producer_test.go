@@ -55,6 +55,27 @@ func TestProducerConnection(t *testing.T) {
 	}
 }
 
+func TestProducerPing(t *testing.T) {
+	log.SetOutput(ioutil.Discard)
+	defer log.SetOutput(os.Stdout)
+
+	config := NewConfig()
+	w, _ := NewProducer("127.0.0.1:4150", config)
+	w.SetLogger(nullLogger, LogLevelInfo)
+
+	err := w.Ping()
+	if err != nil {
+		t.Fatalf("should connect on ping")
+	}
+
+	w.Stop()
+
+	err = w.Ping("write_test", []byte("fail test"))
+	if err != ErrStopped {
+		t.Fatalf("should not be able to ping after Stop()")
+	}
+}
+
 func TestProducerPublish(t *testing.T) {
 	log.SetOutput(ioutil.Discard)
 	defer log.SetOutput(os.Stdout)
