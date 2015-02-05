@@ -82,6 +82,11 @@ func NewProducer(addr string, config *Config) (*Producer, error) {
 	return p, nil
 }
 
+// Ping synchronously sends a Ping command to the configured nsqd, returning an error if the command failed
+func (w *Producer) Ping() error {
+	return w.sendCommand(Ping())
+}
+
 // SetLogger assigns the logger to use as well as a level
 //
 // The logger parameter is an interface that requires the following
