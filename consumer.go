@@ -795,7 +795,7 @@ func (r *Consumer) onConnClose(c *Conn) {
 				}
 				break
 			}
-		}(c.RemoteAddr().String())
+		}(c.String())
 	}
 }
 
