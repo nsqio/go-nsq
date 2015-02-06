@@ -86,8 +86,9 @@ type Consumer struct {
 
 	mtx sync.RWMutex
 
-	logger logger
-	logLvl LogLevel
+	logger   logger
+	logLvl   LogLevel
+	logGuard sync.RWMutex
 
 	behaviorDelegate interface{}
 
@@ -206,8 +207,18 @@ func (r *Consumer) conns() []*Conn {
 //    Output(calldepth int, s string)
 //
 func (r *Consumer) SetLogger(l logger, lvl LogLevel) {
+	r.logGuard.Lock()
+	defer r.logGuard.Unlock()
+
 	r.logger = l
 	r.logLvl = lvl
+}
+
+func (r *Consumer) getLogger() (logger, LogLevel) {
+	r.logGuard.RLock()
+	defer r.logGuard.RUnlock()
+
+	return r.logger, r.logLvl
 }
 
 // SetBehaviorDelegate takes a type implementing one or more
@@ -485,8 +496,10 @@ func (r *Consumer) ConnectToNSQD(addr string) error {
 
 	atomic.StoreInt32(&r.connectedFlag, 1)
 
+	logger, logLvl := r.getLogger()
+
 	conn := NewConn(addr, &r.config, &consumerConnDelegate{r})
-	conn.SetLogger(r.logger, r.logLvl,
+	conn.SetLogger(logger, logLvl,
 		fmt.Sprintf("%3d [%s/%s] (%%s)", r.id, r.topic, r.channel))
 
 	r.mtx.Lock()
@@ -1094,15 +1107,17 @@ func (r *Consumer) exit() {
 }
 
 func (r *Consumer) log(lvl LogLevel, line string, args ...interface{}) {
-	if r.logger == nil {
+	logger, logLvl := r.getLogger()
+
+	if logger == nil {
 		return
 	}
 
-	if r.logLvl > lvl {
+	if logLvl > lvl {
 		return
 	}
 
-	r.logger.Output(2, fmt.Sprintf("%-4s %3d [%s/%s] %s",
+	logger.Output(2, fmt.Sprintf("%-4s %3d [%s/%s] %s",
 		logPrefix(lvl), r.id, r.topic, r.channel,
 		fmt.Sprintf(line, args...)))
 }

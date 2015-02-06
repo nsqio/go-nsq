@@ -20,8 +20,9 @@ type Producer struct {
 	conn   *Conn
 	config Config
 
-	logger logger
-	logLvl LogLevel
+	logger   logger
+	logLvl   LogLevel
+	logGuard sync.RWMutex
 
 	responseChan chan []byte
 	errorChan    chan []byte
@@ -90,8 +91,18 @@ func NewProducer(addr string, config *Config) (*Producer, error) {
 //    Output(calldepth int, s string)
 //
 func (w *Producer) SetLogger(l logger, lvl LogLevel) {
+	w.logGuard.Lock()
+	defer w.logGuard.Unlock()
+
 	w.logger = l
 	w.logLvl = lvl
+}
+
+func (w *Producer) getLogger() (logger, LogLevel) {
+	w.logGuard.RLock()
+	defer w.logGuard.RUnlock()
+
+	return w.logger, w.logLvl
 }
 
 // String returns the address of the Producer
@@ -213,8 +224,11 @@ func (w *Producer) connect() error {
 
 	w.log(LogLevelInfo, "(%s) connecting to nsqd", w.addr)
 
+	logger, logLvl := w.getLogger()
+
 	w.conn = NewConn(w.addr, &w.config, &producerConnDelegate{w})
-	w.conn.SetLogger(w.logger, w.logLvl, fmt.Sprintf("%3d (%%s)", w.id))
+	w.conn.SetLogger(logger, logLvl, fmt.Sprintf("%3d (%%s)", w.id))
+
 	_, err := w.conn.Connect()
 	if err != nil {
 		w.conn.Close()
@@ -301,21 +315,22 @@ func (w *Producer) transactionCleanup() {
 			}
 			// give the runtime a chance to schedule other racing goroutines
 			time.Sleep(5 * time.Millisecond)
-			continue
 		}
 	}
 }
 
 func (w *Producer) log(lvl LogLevel, line string, args ...interface{}) {
-	if w.logger == nil {
+	logger, logLvl := w.getLogger()
+
+	if logger == nil {
 		return
 	}
 
-	if w.logLvl > lvl {
+	if logLvl > lvl {
 		return
 	}
 
-	w.logger.Output(2, fmt.Sprintf("%-4s %3d %s", logPrefix(lvl), w.id, fmt.Sprintf(line, args...)))
+	logger.Output(2, fmt.Sprintf("%-4s %3d %s", logPrefix(lvl), w.id, fmt.Sprintf(line, args...)))
 }
 
 func (w *Producer) onConnResponse(c *Conn, data []byte) { w.responseChan <- data }
