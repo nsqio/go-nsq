@@ -144,13 +144,13 @@ func (w *Producer) MultiPublishAsync(topic string, body [][]byte, doneChan chan 
 }
 
 // Publish synchronously publishes a message body to the specified topic, returning
-// the an error if publish failed
+// an error if publish failed
 func (w *Producer) Publish(topic string, body []byte) error {
 	return w.sendCommand(Publish(topic, body))
 }
 
 // MultiPublish synchronously publishes a slice of message bodies to the specified topic, returning
-// the an error if publish failed
+// an error if publish failed
 func (w *Producer) MultiPublish(topic string, body [][]byte) error {
 	cmd, err := MultiPublish(topic, body)
 	if err != nil {
