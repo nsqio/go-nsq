@@ -73,9 +73,6 @@ type Conn struct {
 	r io.Reader
 	w io.Writer
 
-	backoffCounter int32
-	rdyRetryTimer  *time.Timer
-
 	cmdChan         chan *Command
 	msgResponseChan chan *msgResponse
 	exitChan        chan int
