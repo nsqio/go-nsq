@@ -1,5 +1,15 @@
 ## go-nsq Change Log
 
+### 1.0.3 - 2015-02-07
+
+**Upgrading from 1.0.2**: here are no backward incompatible changes.
+
+ * #104 - fix reconnect address bug (thanks @ryanslade)
+ * #106 - fix backoff reconnect deadlock (thanks @ryanslade)
+ * #107 - fix out-of-bounds error when removing nsqlookupd addresses (thanks @andreas)
+ * #108 - fix potential logger race conditions (thanks @judwhite)
+ * #111 - fix resolved address error in reconnect loop (thanks @twmb)
+
 ### 1.0.2 - 2015-01-21
 
 **Upgrading from 1.0.1**: here are no backward incompatible changes.
