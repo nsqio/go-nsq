@@ -363,13 +363,15 @@ func (r *Consumer) lookupdLoop() {
 	// when restarted at the same time, dont all connect at once.
 	jitter := time.Duration(int64(r.rng.Float64() *
 		r.config.LookupdPollJitter * float64(r.config.LookupdPollInterval)))
-	ticker := time.NewTicker(r.config.LookupdPollInterval)
+	var ticker *time.Ticker
 
 	select {
 	case <-time.After(jitter):
 	case <-r.exitChan:
 		goto exit
 	}
+
+	ticker = time.NewTicker(r.config.LookupdPollInterval)
 
 	for {
 		select {
@@ -383,7 +385,9 @@ func (r *Consumer) lookupdLoop() {
 	}
 
 exit:
-	ticker.Stop()
+	if ticker != nil {
+		ticker.Stop()
+	}
 	r.log(LogLevelInfo, "exiting lookupdLoop")
 	r.wg.Done()
 }
