@@ -513,9 +513,7 @@ func (r *Consumer) ConnectToNSQD(addr string) error {
 		r.mtx.Unlock()
 		return ErrAlreadyConnected
 	}
-	if !pendingOk {
-		r.pendingConnections[addr] = conn
-	}
+	r.pendingConnections[addr] = conn
 	if idx := indexOf(addr, r.nsqdTCPAddrs); idx == -1 {
 		r.nsqdTCPAddrs = append(r.nsqdTCPAddrs, addr)
 	}
