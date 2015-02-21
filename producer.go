@@ -330,7 +330,7 @@ func (w *Producer) log(lvl LogLevel, line string, args ...interface{}) {
 		return
 	}
 
-	logger.Output(2, fmt.Sprintf("%-4s %3d %s", logPrefix(lvl), w.id, fmt.Sprintf(line, args...)))
+	logger.Output(2, fmt.Sprintf("%-4s %3d %s", lvl, w.id, fmt.Sprintf(line, args...)))
 }
 
 func (w *Producer) onConnResponse(c *Conn, data []byte) { w.responseChan <- data }
