@@ -711,7 +711,7 @@ func (c *Conn) log(lvl LogLevel, line string, args ...interface{}) {
 		return
 	}
 
-	logger.Output(2, fmt.Sprintf("%-4s %s %s", logPrefix(lvl),
+	logger.Output(2, fmt.Sprintf("%-4s %s %s", lvl,
 		fmt.Sprintf(logFmt, c.String()),
 		fmt.Sprintf(line, args...)))
 }

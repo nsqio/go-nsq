@@ -1120,6 +1120,6 @@ func (r *Consumer) log(lvl LogLevel, line string, args ...interface{}) {
 	}
 
 	logger.Output(2, fmt.Sprintf("%-4s %3d [%s/%s] %s",
-		logPrefix(lvl), r.id, r.topic, r.channel,
+		lvl, r.id, r.topic, r.channel,
 		fmt.Sprintf(line, args...)))
 }

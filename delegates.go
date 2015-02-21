@@ -2,42 +2,31 @@ package nsq
 
 import "time"
 
-// LogLevel specifies the severity of a given log message
-type LogLevel int
-
 type logger interface {
 	Output(calldepth int, s string) error
 }
 
-// logging constants
+// LogLevel specifies the severity of a given log message
+type LogLevel int
+
 const (
 	LogLevelDebug LogLevel = iota
 	LogLevelInfo
 	LogLevelWarning
 	LogLevelError
-
-	LogLevelDebugPrefix   = "DBG"
-	LogLevelInfoPrefix    = "INF"
-	LogLevelWarningPrefix = "WRN"
-	LogLevelErrorPrefix   = "ERR"
 )
 
-// LogPrefix Resolution
-func logPrefix(lvl LogLevel) string {
-	var prefix string
-
+// String returns the string form for a given LogLevel
+func (lvl LogLevel) String() string {
 	switch lvl {
-	case LogLevelDebug:
-		prefix = LogLevelDebugPrefix
 	case LogLevelInfo:
-		prefix = LogLevelInfoPrefix
+		return "INF"
 	case LogLevelWarning:
-		prefix = LogLevelWarningPrefix
+		return "WRN"
 	case LogLevelError:
-		prefix = LogLevelErrorPrefix
+		return "ERR"
 	}
-
-	return prefix
+	return "DBG"
 }
 
 // MessageDelegate is an interface of methods that are used as
