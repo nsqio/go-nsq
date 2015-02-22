@@ -2,9 +2,6 @@ package nsq
 
 import (
 	"errors"
-	"io/ioutil"
-	"log"
-	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -35,9 +32,6 @@ func (h *ConsumerHandler) HandleMessage(message *Message) error {
 }
 
 func TestProducerConnection(t *testing.T) {
-	log.SetOutput(ioutil.Discard)
-	defer log.SetOutput(os.Stdout)
-
 	config := NewConfig()
 	w, _ := NewProducer("127.0.0.1:4150", config)
 	w.SetLogger(nullLogger, LogLevelInfo)
@@ -56,9 +50,6 @@ func TestProducerConnection(t *testing.T) {
 }
 
 func TestProducerPublish(t *testing.T) {
-	log.SetOutput(ioutil.Discard)
-	defer log.SetOutput(os.Stdout)
-
 	topicName := "publish" + strconv.Itoa(int(time.Now().Unix()))
 	msgCount := 10
 
@@ -83,9 +74,6 @@ func TestProducerPublish(t *testing.T) {
 }
 
 func TestProducerMultiPublish(t *testing.T) {
-	log.SetOutput(ioutil.Discard)
-	defer log.SetOutput(os.Stdout)
-
 	topicName := "multi_publish" + strconv.Itoa(int(time.Now().Unix()))
 	msgCount := 10
 
@@ -113,9 +101,6 @@ func TestProducerMultiPublish(t *testing.T) {
 }
 
 func TestProducerPublishAsync(t *testing.T) {
-	log.SetOutput(ioutil.Discard)
-	defer log.SetOutput(os.Stdout)
-
 	topicName := "async_publish" + strconv.Itoa(int(time.Now().Unix()))
 	msgCount := 10
 
@@ -151,9 +136,6 @@ func TestProducerPublishAsync(t *testing.T) {
 }
 
 func TestProducerMultiPublishAsync(t *testing.T) {
-	log.SetOutput(ioutil.Discard)
-	defer log.SetOutput(os.Stdout)
-
 	topicName := "multi_publish" + strconv.Itoa(int(time.Now().Unix()))
 	msgCount := 10
 
@@ -193,9 +175,6 @@ func TestProducerMultiPublishAsync(t *testing.T) {
 }
 
 func TestProducerHeartbeat(t *testing.T) {
-	log.SetOutput(ioutil.Discard)
-	defer log.SetOutput(os.Stdout)
-
 	topicName := "heartbeat" + strconv.Itoa(int(time.Now().Unix()))
 
 	config := NewConfig()

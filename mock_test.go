@@ -10,7 +10,6 @@ import (
 	"io/ioutil"
 	"log"
 	"net"
-	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -182,9 +181,6 @@ func (h *testHandler) HandleMessage(message *Message) error {
 }
 
 func TestConsumerBackoff(t *testing.T) {
-	log.SetOutput(ioutil.Discard)
-	defer log.SetOutput(os.Stdout)
-
 	logger := log.New(ioutil.Discard, "", log.LstdFlags)
 
 	var mgood bytes.Buffer
