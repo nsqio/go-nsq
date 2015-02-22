@@ -9,6 +9,14 @@ import (
 	"time"
 )
 
+type producerConn interface {
+	String() string
+	SetLogger(logger, LogLevel, string)
+	Connect() (*IdentifyResponse, error)
+	Close() error
+	WriteCommand(*Command) error
+}
+
 // Producer is a high-level type to publish to NSQ.
 //
 // A Producer instance is 1:1 with a destination `nsqd`
@@ -17,7 +25,7 @@ import (
 type Producer struct {
 	id     int64
 	addr   string
-	conn   *Conn
+	conn   producerConn
 	config Config
 
 	logger   logger

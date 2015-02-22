@@ -1,8 +1,12 @@
 package nsq
 
 import (
+	"bytes"
 	"errors"
+	"runtime"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -247,4 +251,86 @@ func readMessages(topicName string, t *testing.T, msgCount int) {
 	if h.messagesFailed != 1 {
 		t.Fatal("failed message not done")
 	}
+}
+
+type mockProducerConn struct {
+	delegate ConnDelegate
+	closeCh  chan struct{}
+	pubCh    chan struct{}
+}
+
+func newMockProducerConn(delegate ConnDelegate) producerConn {
+	m := &mockProducerConn{
+		delegate: delegate,
+		closeCh:  make(chan struct{}),
+		pubCh:    make(chan struct{}, 4),
+	}
+	go m.router()
+	return m
+}
+
+func (m *mockProducerConn) String() string {
+	return "127.0.0.1:0"
+}
+
+func (m *mockProducerConn) SetLogger(logger logger, level LogLevel, prefix string) {}
+
+func (m *mockProducerConn) Connect() (*IdentifyResponse, error) {
+	return &IdentifyResponse{}, nil
+}
+
+func (m *mockProducerConn) Close() error {
+	close(m.closeCh)
+	return nil
+}
+
+func (m *mockProducerConn) WriteCommand(cmd *Command) error {
+	if bytes.Equal(cmd.Name, []byte("PUB")) {
+		m.pubCh <- struct{}{}
+	}
+	return nil
+}
+
+func (m *mockProducerConn) router() {
+	for {
+		select {
+		case <-m.closeCh:
+			goto exit
+		case <-m.pubCh:
+			m.delegate.OnResponse(nil, framedResponse(FrameTypeResponse, []byte("OK")))
+		}
+	}
+exit:
+}
+
+func BenchmarkProducer(b *testing.B) {
+	b.StopTimer()
+	body := make([]byte, 512)
+
+	config := NewConfig()
+	p, _ := NewProducer("127.0.0.1:0", config)
+
+	p.conn = newMockProducerConn(&producerConnDelegate{p})
+	atomic.StoreInt32(&p.state, StateConnected)
+	p.closeChan = make(chan int)
+	go p.router()
+
+	startCh := make(chan struct{})
+	var wg sync.WaitGroup
+	parallel := runtime.GOMAXPROCS(0)
+
+	for j := 0; j < parallel; j++ {
+		wg.Add(1)
+		go func() {
+			<-startCh
+			for i := 0; i < b.N/parallel; i++ {
+				p.Publish("test", body)
+			}
+			wg.Done()
+		}()
+	}
+
+	b.StartTimer()
+	close(startCh)
+	wg.Wait()
 }
