@@ -3,6 +3,9 @@ package nsq
 import (
 	"bytes"
 	"errors"
+	"io/ioutil"
+	"log"
+	"os"
 	"runtime"
 	"strconv"
 	"sync"
@@ -50,6 +53,28 @@ func TestProducerConnection(t *testing.T) {
 	err = w.Publish("write_test", []byte("fail test"))
 	if err != ErrStopped {
 		t.Fatalf("should not be able to write after Stop()")
+	}
+}
+
+func TestProducerPing(t *testing.T) {
+	log.SetOutput(ioutil.Discard)
+	defer log.SetOutput(os.Stdout)
+
+	config := NewConfig()
+	w, _ := NewProducer("127.0.0.1:4150", config)
+	w.SetLogger(nullLogger, LogLevelInfo)
+
+	err := w.Ping()
+
+	if err != nil {
+		t.Fatalf("should connect on ping")
+	}
+
+	w.Stop()
+
+	err = w.Ping()
+	if err != ErrStopped {
+		t.Fatalf("should not be able to ping after Stop()")
 	}
 }
 
