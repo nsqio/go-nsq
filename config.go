@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math"
+	"math/rand"
 	"net"
 	"os"
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unsafe"
 )
@@ -25,6 +28,61 @@ type configHandler interface {
 
 type defaultsHandler interface {
 	SetDefaults(c *Config) error
+}
+
+// BackoffStrategy defines a strategy for calculating the duration of time
+// a consumer should backoff for a given attempt
+type BackoffStrategy interface {
+	Calculate(attempt int) time.Duration
+}
+
+// ExponentialStrategy implements an exponential backoff strategy (default)
+type ExponentialStrategy struct {
+	cfg *Config
+}
+
+// Calculate returns a duration of time: 2 ^ attempt
+func (s *ExponentialStrategy) Calculate(attempt int) time.Duration {
+	backoffDuration := s.cfg.BackoffMultiplier *
+		time.Duration(math.Pow(2, float64(attempt)))
+	if backoffDuration > s.cfg.MaxBackoffDuration {
+		backoffDuration = s.cfg.MaxBackoffDuration
+	}
+	return backoffDuration
+}
+
+func (s *ExponentialStrategy) setConfig(cfg *Config) {
+	s.cfg = cfg
+}
+
+// FullJitterStrategy implements http://www.awsarchitectureblog.com/2015/03/backoff.html
+type FullJitterStrategy struct {
+	cfg *Config
+
+	rngOnce sync.Once
+	rng     *rand.Rand
+}
+
+// Calculate returns a random duration of time [0, 2 ^ attempt]
+func (s *FullJitterStrategy) Calculate(attempt int) time.Duration {
+	// lazily initialize the RNG
+	s.rngOnce.Do(func() {
+		if s.rng != nil {
+			return
+		}
+		s.rng = rand.New(rand.NewSource(time.Now().UnixNano()))
+	})
+
+	backoffDuration := s.cfg.BackoffMultiplier *
+		time.Duration(math.Pow(2, float64(attempt)))
+	if backoffDuration > s.cfg.MaxBackoffDuration {
+		backoffDuration = s.cfg.MaxBackoffDuration
+	}
+	return time.Duration(s.rng.Intn(int(backoffDuration)))
+}
+
+func (s *FullJitterStrategy) setConfig(cfg *Config) {
+	s.cfg = cfg
 }
 
 // Config is a struct of NSQ options
@@ -59,11 +117,17 @@ type Config struct {
 	// Maximum duration when REQueueing (for doubling of deferred requeue)
 	MaxRequeueDelay     time.Duration `opt:"max_requeue_delay" min:"0" max:"60m" default:"15m"`
 	DefaultRequeueDelay time.Duration `opt:"default_requeue_delay" min:"0" max:"60m" default:"90s"`
+
+	// Backoff strategy, defaults to exponential backoff. Overwrite this to define alternative backoff algrithms.
+	BackoffStrategy BackoffStrategy
+	// Maximum amount of time to backoff when processing fails 0 == no backoff
+	MaxBackoffDuration time.Duration `opt:"max_backoff_duration" min:"0" max:"60m" default:"2m"`
 	// Unit of time for calculating consumer backoff
 	BackoffMultiplier time.Duration `opt:"backoff_multiplier" min:"0" max:"60m" default:"1s"`
 
 	// Maximum number of times this consumer will attempt to process a message before giving up
 	MaxAttempts uint16 `opt:"max_attempts" min:"0" max:"65535" default:"5"`
+
 	// Amount of time in seconds to wait for a message from a producer when in a state where RDY
 	// counts are re-distributed (ie. max_in_flight < num_producers)
 	LowRdyIdleTimeout time.Duration `opt:"low_rdy_idle_timeout" min:"1s" max:"5m" default:"10s"`
@@ -108,9 +172,6 @@ type Config struct {
 	// Maximum number of messages to allow in flight (concurrency knob)
 	MaxInFlight int `opt:"max_in_flight" min:"0" default:"1"`
 
-	// Maximum amount of time to backoff when processing fails 0 == no backoff
-	MaxBackoffDuration time.Duration `opt:"max_backoff_duration" min:"0" max:"60m" default:"2m"`
-
 	// The server-side message timeout for messages delivered to this client
 	MsgTimeout time.Duration `opt:"msg_timeout" min:"0"`
 
@@ -122,9 +183,10 @@ type Config struct {
 //
 // This must be used to initialize Config structs. Values can be set directly, or through Config.Set()
 func NewConfig() *Config {
-	c := &Config{}
-	c.configHandlers = append(c.configHandlers, &structTagsConfig{}, &tlsConfig{})
-	c.initialized = true
+	c := &Config{
+		configHandlers: []configHandler{&structTagsConfig{}, &tlsConfig{}},
+		initialized: true,
+	}
 	if err := c.setDefaults(); err != nil {
 		panic(err.Error())
 	}
@@ -170,7 +232,6 @@ func (c *Config) assertInitialized() {
 // Validate checks that all values are within specified min/max ranges
 func (c *Config) Validate() error {
 	c.assertInitialized()
-
 	for _, h := range c.configHandlers {
 		if err := h.Validate(c); err != nil {
 			return err
@@ -188,7 +249,6 @@ func (c *Config) setDefaults() error {
 			}
 		}
 	}
-
 	return nil
 }
 
@@ -271,6 +331,7 @@ func (h *structTagsConfig) SetDefaults(c *Config) error {
 		log.Fatalf("ERROR: unable to get hostname %s", err.Error())
 	}
 
+	c.BackoffStrategy = &ExponentialStrategy{}
 	c.ClientID = strings.Split(hostname, ".")[0]
 	c.Hostname = hostname
 	c.UserAgent = fmt.Sprintf("go-nsq/%s", VERSION)
@@ -311,6 +372,18 @@ func (h *structTagsConfig) Validate(c *Config) error {
 	if c.HeartbeatInterval > c.ReadTimeout {
 		return fmt.Errorf("HeartbeatInterval %v must be less than ReadTimeout %v", c.HeartbeatInterval, c.ReadTimeout)
 	}
+
+	if c.BackoffStrategy == nil {
+		return fmt.Errorf("BackoffStrategy cannot be nil")
+	}
+
+	// initialize internal backoff strategies that need access to config
+	if v, ok := c.BackoffStrategy.(interface {
+		setConfig(*Config)
+	}); ok {
+		v.setConfig(c)
+	}
+
 	return nil
 }
 
