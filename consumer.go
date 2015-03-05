@@ -820,6 +820,9 @@ func (r *Consumer) backoffDurationForCount(count int32) time.Duration {
 	if backoffDuration > r.config.MaxBackoffDuration {
 		backoffDuration = r.config.MaxBackoffDuration
 	}
+	// Full Jittered Backoff
+	// http://www.awsarchitectureblog.com/2015/03/backoff.html
+	backoffDuration = time.Duration(r.rng.Intn(int(backoffDuration)))
 	return backoffDuration
 }
 
