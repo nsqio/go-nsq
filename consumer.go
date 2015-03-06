@@ -676,7 +676,7 @@ func (r *Consumer) startStopContinueBackoff(conn *Conn, success bool) {
 		}
 	} else if r.backoffCounter > 0 {
 		// start or continue backoff
-		backoffDuration := r.backoffDurationForCount(r.backoffCounter)
+		backoffDuration := r.config.BackoffStrategy.Calculate(int(r.backoffCounter))
 		atomic.StoreInt64(&r.backoffDuration, backoffDuration.Nanoseconds())
 		time.AfterFunc(backoffDuration, r.backoff)
 
@@ -812,18 +812,6 @@ func (r *Consumer) onConnClose(c *Conn) {
 			}
 		}(c.String())
 	}
-}
-
-func (r *Consumer) backoffDurationForCount(count int32) time.Duration {
-	backoffDuration := r.config.BackoffMultiplier *
-		time.Duration(math.Pow(2, float64(count)))
-	if backoffDuration > r.config.MaxBackoffDuration {
-		backoffDuration = r.config.MaxBackoffDuration
-	}
-	// Full Jittered Backoff
-	// http://www.awsarchitectureblog.com/2015/03/backoff.html
-	backoffDuration = time.Duration(r.rng.Intn(int(backoffDuration)))
-	return backoffDuration
 }
 
 func (r *Consumer) inBackoff() bool {
