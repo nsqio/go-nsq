@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"log"
 	"math"
+	"math/rand"
 	"os"
 	"reflect"
 	"strconv"
@@ -33,15 +34,32 @@ type BackoffStrategy interface {
 }
 
 type ExponentialStrategy struct {
-	config *Config
+	Config *Config
 }
 
 func (s ExponentialStrategy) Calculate(attempt int) time.Duration {
-	backoffDuration := s.config.BackoffMultiplier *
+	backoffDuration := s.Config.BackoffMultiplier *
 		time.Duration(math.Pow(2, float64(attempt)))
-	if backoffDuration > s.config.MaxBackoffDuration {
-		backoffDuration = s.config.MaxBackoffDuration
+	if backoffDuration > s.Config.MaxBackoffDuration {
+		backoffDuration = s.Config.MaxBackoffDuration
 	}
+	return backoffDuration
+}
+
+// Full Jittered Backoff
+// http://www.awsarchitectureblog.com/2015/03/backoff.html
+type FullJitterStrategy struct {
+	Config *Config
+	Rng *rand.Rand
+}
+
+func (s FullJitterStrategy) Calculate(attempt int) time.Duration {
+	backoffDuration := s.Config.BackoffMultiplier *
+		time.Duration(math.Pow(2, float64(attempt)))
+	if backoffDuration > s.Config.MaxBackoffDuration {
+		backoffDuration = s.Config.MaxBackoffDuration
+	}
+	backoffDuration = time.Duration(s.Rng.Intn(int(backoffDuration)))
 	return backoffDuration
 }
 
@@ -139,7 +157,7 @@ func NewConfig() *Config {
 	c := &Config{}
 	c.configHandlers = append(c.configHandlers, &structTagsConfig{}, &tlsConfig{})
 	c.initialized = true
-	c.BackoffStrategy = BackoffStrategy(ExponentialStrategy{c})
+	c.BackoffStrategy = ExponentialStrategy{c}
 	if err := c.setDefaults(); err != nil {
 		panic(err.Error())
 	}
