@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math"
+	"math/rand"
 	"os"
 	"reflect"
 	"strconv"
@@ -24,6 +26,41 @@ type configHandler interface {
 
 type defaultsHandler interface {
 	SetDefaults(c *Config) error
+}
+
+// Define backoffStrategy
+type BackoffStrategy interface {
+   Calculate(attempt int) time.Duration
+}
+
+type ExponentialStrategy struct {
+	Config *Config
+}
+
+func (s ExponentialStrategy) Calculate(attempt int) time.Duration {
+	backoffDuration := s.Config.BackoffMultiplier *
+		time.Duration(math.Pow(2, float64(attempt)))
+	if backoffDuration > s.Config.MaxBackoffDuration {
+		backoffDuration = s.Config.MaxBackoffDuration
+	}
+	return backoffDuration
+}
+
+// Full Jittered Backoff
+// http://www.awsarchitectureblog.com/2015/03/backoff.html
+type FullJitterStrategy struct {
+	Config *Config
+	Rng *rand.Rand
+}
+
+func (s FullJitterStrategy) Calculate(attempt int) time.Duration {
+	backoffDuration := s.Config.BackoffMultiplier *
+		time.Duration(math.Pow(2, float64(attempt)))
+	if backoffDuration > s.Config.MaxBackoffDuration {
+		backoffDuration = s.Config.MaxBackoffDuration
+	}
+	backoffDuration = time.Duration(s.Rng.Intn(int(backoffDuration)))
+	return backoffDuration
 }
 
 // Config is a struct of NSQ options
@@ -103,6 +140,8 @@ type Config struct {
 
 	// Maximum amount of time to backoff when processing fails 0 == no backoff
 	MaxBackoffDuration time.Duration `opt:"max_backoff_duration" min:"0" max:"60m" default:"2m"`
+	// Backoff strategy, defaults to exponential backoff. Overwrite this to define alternative backoff algrithms.
+	BackoffStrategy BackoffStrategy
 
 	// The server-side message timeout for messages delivered to this client
 	MsgTimeout time.Duration `opt:"msg_timeout" min:"0"`
@@ -118,6 +157,7 @@ func NewConfig() *Config {
 	c := &Config{}
 	c.configHandlers = append(c.configHandlers, &structTagsConfig{}, &tlsConfig{})
 	c.initialized = true
+	c.BackoffStrategy = ExponentialStrategy{c}
 	if err := c.setDefaults(); err != nil {
 		panic(err.Error())
 	}

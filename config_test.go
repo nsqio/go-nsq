@@ -1,6 +1,10 @@
 package nsq
 
-import "testing"
+import (
+	"math/rand"
+	"testing"
+	"time"
+)
 
 func TestConfigSet(t *testing.T) {
 	c := NewConfig()
@@ -39,3 +43,40 @@ func TestConfigValidate(t *testing.T) {
 	}
 
 }
+
+func TestExponentialBackoff(t *testing.T) {
+	expected := []time.Duration{
+		1 * time.Second,
+		2 * time.Second,
+		8 * time.Second,
+		32 * time.Second,
+	}
+	backoffTest(t, expected, func(c *Config) BackoffStrategy {
+		return ExponentialStrategy{c}
+	})
+}
+
+func TestFullJitterBackoff(t *testing.T) {
+	expected := []time.Duration{
+		566028617 * time.Nanosecond,
+		1365407263 * time.Nanosecond,
+		5232470547 * time.Nanosecond,
+		21467499218 * time.Nanosecond,
+	}
+	backoffTest(t, expected, func(c *Config) BackoffStrategy {
+		return FullJitterStrategy{c, rand.New(rand.NewSource(99))}
+	})
+}
+
+func backoffTest(t *testing.T, expected []time.Duration, cb func(c *Config) BackoffStrategy) {
+	config := NewConfig()
+	attempts := []int{0, 1, 3, 5}
+	s := cb(config)
+	for i := range attempts {
+		result := s.Calculate(attempts[i])
+		if result != expected[i] {
+			t.Fatalf("srong backoff duration %v for attempt %d (should be %v)", result, attempts[i], expected[i])
+		}
+	}
+}
+
