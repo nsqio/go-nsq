@@ -1,6 +1,9 @@
 package nsq
 
-import "testing"
+import (
+	"net"
+	"testing"
+)
 
 func TestConfigSet(t *testing.T) {
 	c := NewConfig()
@@ -11,7 +14,7 @@ func TestConfigSet(t *testing.T) {
 		t.Error("No error when setting `tls_v1` to an invalid value")
 	}
 	if err := c.Set("tls_v1", true); err != nil {
-		t.Errorf("Error setting `tls_v1` config. %v", err)
+		t.Errorf("Error setting `tls_v1` config. %s", err)
 	}
 
 	if err := c.Set("tls-insecure-skip-verify", true); err != nil {
@@ -21,10 +24,22 @@ func TestConfigSet(t *testing.T) {
 		t.Errorf("Error setting `tls-insecure-skip-verify` config: %v", c.TlsConfig)
 	}
 	if err := c.Set("tls-min-version", "tls1.2"); err != nil {
-		t.Errorf("Error setting `tls-min-version` config: %v", err)
+		t.Errorf("Error setting `tls-min-version` config: %s", err)
 	}
 	if err := c.Set("tls-min-version", "tls1.3"); err == nil {
 		t.Error("No error when setting `tls-min-version` to an invalid value")
+	}
+	if err := c.Set("local_addr", &net.TCPAddr{}); err != nil {
+		t.Errorf("Error setting `local_addr` config: %s", err)
+	}
+	if err := c.Set("local_addr", "1.2.3.4:27015"); err != nil {
+		t.Errorf("Error setting `local_addr` config: %s", err)
+	}
+	if err := c.Set("dial_timeout", "5s"); err != nil {
+		t.Errorf("Error setting `dial_timeout` config: %s", err)
+	}
+	if c.LocalAddr.String() != "1.2.3.4:27015" {
+		t.Error("Failed to assign `local_addr` config")
 	}
 }
 
@@ -37,5 +52,4 @@ func TestConfigValidate(t *testing.T) {
 	if err := c.Validate(); err == nil {
 		t.Error("no error set for invalid value")
 	}
-
 }
