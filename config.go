@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net"
 	"os"
 	"reflect"
 	"strconv"
@@ -39,9 +40,15 @@ type Config struct {
 	// used to Initialize, Validate
 	configHandlers []configHandler
 
+	DialTimeout time.Duration `opt:"dial_timeout" default:"1s"`
+
 	// Deadlines for network reads and writes
 	ReadTimeout  time.Duration `opt:"read_timeout" min:"100ms" max:"5m" default:"60s"`
 	WriteTimeout time.Duration `opt:"write_timeout" min:"100ms" max:"5m" default:"1s"`
+
+	// LocalAddr is the local address to use when dialing an nsqd.
+	// If empty, a local address is automatically chosen.
+	LocalAddr net.Addr `opt:"local_addr"`
 
 	// Duration between polling lookupd for new producers, and fractional jitter to add to
 	// the lookupd pool loop. this helps evenly distribute requests even if multiple consumers
@@ -456,6 +463,8 @@ func coerce(v interface{}, typ reflect.Type) (reflect.Value, error) {
 		v, err = coerceBool(v)
 	case "time.Duration":
 		v, err = coerceDuration(v)
+	case "net.Addr":
+		v, err = coerceAddr(v)
 	default:
 		v = nil
 		err = errors.New(fmt.Sprintf("invalid type %s", typ.String()))
@@ -476,14 +485,16 @@ func valueTypeCoerce(v interface{}, typ reflect.Type) reflect.Value {
 		tval.SetUint(val.Uint())
 	case "float32", "float64":
 		tval.SetFloat(val.Float())
+	default:
+		tval.Set(val)
 	}
 	return tval
 }
 
 func coerceString(v interface{}) (string, error) {
-	switch v.(type) {
+	switch v := v.(type) {
 	case string:
-		return v.(string), nil
+		return v, nil
 	case int, int16, int32, int64, uint, uint16, uint32, uint64:
 		return fmt.Sprintf("%d", v), nil
 	case float32, float64:
@@ -495,9 +506,9 @@ func coerceString(v interface{}) (string, error) {
 }
 
 func coerceDuration(v interface{}) (time.Duration, error) {
-	switch v.(type) {
+	switch v := v.(type) {
 	case string:
-		return time.ParseDuration(v.(string))
+		return time.ParseDuration(v)
 	case int, int16, int32, int64:
 		// treat like ms
 		return time.Duration(reflect.ValueOf(v).Int()) * time.Millisecond, nil
@@ -505,17 +516,27 @@ func coerceDuration(v interface{}) (time.Duration, error) {
 		// treat like ms
 		return time.Duration(reflect.ValueOf(v).Uint()) * time.Millisecond, nil
 	case time.Duration:
-		return v.(time.Duration), nil
+		return v, nil
 	}
 	return 0, errors.New("invalid value type")
 }
 
-func coerceBool(v interface{}) (bool, error) {
-	switch v.(type) {
-	case bool:
-		return v.(bool), nil
+func coerceAddr(v interface{}) (net.Addr, error) {
+	switch v := v.(type) {
 	case string:
-		return strconv.ParseBool(v.(string))
+		return net.ResolveTCPAddr("tcp", v)
+	case net.Addr:
+		return v, nil
+	}
+	return nil, errors.New("invalid value type")
+}
+
+func coerceBool(v interface{}) (bool, error) {
+	switch v := v.(type) {
+	case bool:
+		return v, nil
+	case string:
+		return strconv.ParseBool(v)
 	case int, int16, int32, int64:
 		return reflect.ValueOf(v).Int() != 0, nil
 	case uint, uint16, uint32, uint64:
@@ -525,25 +546,25 @@ func coerceBool(v interface{}) (bool, error) {
 }
 
 func coerceFloat64(v interface{}) (float64, error) {
-	switch v.(type) {
+	switch v := v.(type) {
 	case string:
-		return strconv.ParseFloat(v.(string), 64)
+		return strconv.ParseFloat(v, 64)
 	case int, int16, int32, int64:
 		return float64(reflect.ValueOf(v).Int()), nil
 	case uint, uint16, uint32, uint64:
 		return float64(reflect.ValueOf(v).Uint()), nil
 	case float32:
-		return float64(v.(float32)), nil
+		return float64(v), nil
 	case float64:
-		return v.(float64), nil
+		return v, nil
 	}
 	return 0, errors.New("invalid value type")
 }
 
 func coerceInt64(v interface{}) (int64, error) {
-	switch v.(type) {
+	switch v := v.(type) {
 	case string:
-		return strconv.ParseInt(v.(string), 10, 64)
+		return strconv.ParseInt(v, 10, 64)
 	case int, int16, int32, int64:
 		return reflect.ValueOf(v).Int(), nil
 	case uint, uint16, uint32, uint64:
@@ -553,9 +574,9 @@ func coerceInt64(v interface{}) (int64, error) {
 }
 
 func coerceUint64(v interface{}) (uint64, error) {
-	switch v.(type) {
+	switch v := v.(type) {
 	case string:
-		return strconv.ParseUint(v.(string), 10, 64)
+		return strconv.ParseUint(v, 10, 64)
 	case int, int16, int32, int64:
 		return uint64(reflect.ValueOf(v).Int()), nil
 	case uint, uint16, uint32, uint64:

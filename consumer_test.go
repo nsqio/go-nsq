@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -140,6 +141,9 @@ func TestConsumerTLSClientCertViaSet(t *testing.T) {
 
 func consumerTest(t *testing.T, cb func(c *Config)) {
 	config := NewConfig()
+	laddr := "127.0.0.2"
+	// so that the test can simulate binding consumer to specified address
+	config.LocalAddr, _ = net.ResolveTCPAddr("tcp", laddr+":0")
 	// so that the test can simulate reaching max requeues and a call to LogFailedMessage
 	config.DefaultRequeueDelay = 0
 	// so that the test wont timeout from backing off
@@ -185,6 +189,11 @@ func consumerTest(t *testing.T, cb func(c *Config)) {
 	err = q.ConnectToNSQD(addr)
 	if err == nil {
 		t.Fatal("should not be able to connect to the same NSQ twice")
+	}
+
+	conn := q.conns()[0]
+	if !strings.HasPrefix(conn.conn.LocalAddr().String(), laddr) {
+		t.Fatal("connection should be bound to the specified address:", conn.conn.LocalAddr())
 	}
 
 	err = q.DisconnectFromNSQD("1.2.3.4:4150")
