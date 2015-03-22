@@ -141,7 +141,7 @@ func TestConsumerTLSClientCertViaSet(t *testing.T) {
 
 func consumerTest(t *testing.T, cb func(c *Config)) {
 	config := NewConfig()
-	laddr := "127.0.0.2"
+	laddr := "127.0.0.1"
 	// so that the test can simulate binding consumer to specified address
 	config.LocalAddr, _ = net.ResolveTCPAddr("tcp", laddr+":0")
 	// so that the test can simulate reaching max requeues and a call to LogFailedMessage
