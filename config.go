@@ -119,7 +119,7 @@ type Config struct {
 	DefaultRequeueDelay time.Duration `opt:"default_requeue_delay" min:"0" max:"60m" default:"90s"`
 
 	// Backoff strategy, defaults to exponential backoff. Overwrite this to define alternative backoff algrithms.
-	BackoffStrategy BackoffStrategy
+	BackoffStrategy BackoffStrategy `opt:"backoff_strategy" default:"exponential"`
 	// Maximum amount of time to backoff when processing fails 0 == no backoff
 	MaxBackoffDuration time.Duration `opt:"max_backoff_duration" min:"0" max:"60m" default:"2m"`
 	// Unit of time for calculating consumer backoff
@@ -185,7 +185,7 @@ type Config struct {
 func NewConfig() *Config {
 	c := &Config{
 		configHandlers: []configHandler{&structTagsConfig{}, &tlsConfig{}},
-		initialized: true,
+		initialized:    true,
 	}
 	if err := c.setDefaults(); err != nil {
 		panic(err.Error())
@@ -304,6 +304,14 @@ func (h *structTagsConfig) Set(c *Config, option string, value interface{}) erro
 					option, coercedVal.Interface(), coercedMaxVal.Interface())
 			}
 		}
+		if coercedVal.Type().String() == "nsq.BackoffStrategy" {
+			v := coercedVal.Interface().(BackoffStrategy)
+			if v, ok := v.(interface {
+				setConfig(*Config)
+			}); ok {
+				v.setConfig(c)
+			}
+		}
 		dest.Set(coercedVal)
 		return nil
 	}
@@ -331,7 +339,6 @@ func (h *structTagsConfig) SetDefaults(c *Config) error {
 		log.Fatalf("ERROR: unable to get hostname %s", err.Error())
 	}
 
-	c.BackoffStrategy = &ExponentialStrategy{}
 	c.ClientID = strings.Split(hostname, ".")[0]
 	c.Hostname = hostname
 	c.UserAgent = fmt.Sprintf("go-nsq/%s", VERSION)
@@ -371,17 +378,6 @@ func (h *structTagsConfig) Validate(c *Config) error {
 
 	if c.HeartbeatInterval > c.ReadTimeout {
 		return fmt.Errorf("HeartbeatInterval %v must be less than ReadTimeout %v", c.HeartbeatInterval, c.ReadTimeout)
-	}
-
-	if c.BackoffStrategy == nil {
-		return fmt.Errorf("BackoffStrategy cannot be nil")
-	}
-
-	// initialize internal backoff strategies that need access to config
-	if v, ok := c.BackoffStrategy.(interface {
-		setConfig(*Config)
-	}); ok {
-		v.setConfig(c)
 	}
 
 	return nil
@@ -538,6 +534,8 @@ func coerce(v interface{}, typ reflect.Type) (reflect.Value, error) {
 		v, err = coerceDuration(v)
 	case "net.Addr":
 		v, err = coerceAddr(v)
+	case "nsq.BackoffStrategy":
+		v, err = coerceBackoffStrategy(v)
 	default:
 		v = nil
 		err = errors.New(fmt.Sprintf("invalid type %s", typ.String()))
@@ -599,6 +597,21 @@ func coerceAddr(v interface{}) (net.Addr, error) {
 	case string:
 		return net.ResolveTCPAddr("tcp", v)
 	case net.Addr:
+		return v, nil
+	}
+	return nil, errors.New("invalid value type")
+}
+
+func coerceBackoffStrategy(v interface{}) (BackoffStrategy, error) {
+	switch v := v.(type) {
+	case string:
+		switch v {
+		case "", "exponential":
+			return &ExponentialStrategy{}, nil
+		case "full_jitter":
+			return &FullJitterStrategy{}, nil
+		}
+	case BackoffStrategy:
 		return v, nil
 	}
 	return nil, errors.New("invalid value type")

@@ -3,6 +3,7 @@ package nsq
 import (
 	"math/rand"
 	"net"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -42,6 +43,15 @@ func TestConfigSet(t *testing.T) {
 	}
 	if c.LocalAddr.String() != "1.2.3.4:27015" {
 		t.Error("Failed to assign `local_addr` config")
+	}
+	if reflect.ValueOf(c.BackoffStrategy).Type().String() != "*nsq.ExponentialStrategy" {
+		t.Error("Failed to set default `exponential` backoff strategy")
+	}
+	if err := c.Set("backoff_strategy", "full_jitter"); err != nil {
+		t.Errorf("Failed to assign `backoff_strategy` config: %v", err)
+	}
+	if reflect.ValueOf(c.BackoffStrategy).Type().String() != "*nsq.FullJitterStrategy" {
+		t.Error("Failed to set `full_jitter` backoff strategy")
 	}
 }
 
