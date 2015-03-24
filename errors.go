@@ -13,6 +13,9 @@ var ErrNotConnected = errors.New("not connected")
 // made against a Producer that has been stopped
 var ErrStopped = errors.New("stopped")
 
+// ErrClosing is returned when a connection is closing
+var ErrClosing = errors.New("closing")
+
 // ErrAlreadyConnected is returned from ConnectToNSQD when already connected
 var ErrAlreadyConnected = errors.New("already connected")
 

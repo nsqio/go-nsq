@@ -691,9 +691,9 @@ func (r *Consumer) startStopContinueBackoff(conn *Conn, success bool) {
 }
 
 func (r *Consumer) backoff() {
-	atomic.StoreInt64(&r.backoffDuration, 0)
 
 	if atomic.LoadInt32(&r.stopFlag) == 1 {
+		atomic.StoreInt64(&r.backoffDuration, 0)
 		return
 	}
 
@@ -713,7 +713,16 @@ func (r *Consumer) backoff() {
 		"(%s) backoff timeout expired, sending RDY 1",
 		choice.String())
 	// while in backoff only ever let 1 message at a time through
-	r.updateRDY(choice, 1)
+	err := r.updateRDY(choice, 1)
+	if err != nil {
+		r.log(LogLevelWarning, "(%s) error updating RDY - %s", choice.String(), err)
+		backoffDuration := 1 * time.Second
+		atomic.StoreInt64(&r.backoffDuration, backoffDuration.Nanoseconds())
+		time.AfterFunc(backoffDuration, r.backoff)
+		return
+	}
+
+	atomic.StoreInt64(&r.backoffDuration, 0)
 }
 
 func (r *Consumer) onConnResponse(c *Conn, data []byte) {
@@ -865,7 +874,7 @@ exit:
 
 func (r *Consumer) updateRDY(c *Conn, count int64) error {
 	if c.IsClosing() {
-		return nil
+		return ErrClosing
 	}
 
 	// never exceed the nsqd's configured max RDY count
