@@ -66,6 +66,14 @@ type ConsumerStats struct {
 
 var instCount int64
 
+type backoffSignal int
+
+const (
+	backoffFlag backoffSignal = iota
+	continueFlag
+	resumeFlag
+)
+
 // Consumer is a high-level type to consume from NSQ.
 //
 // A Consumer instance is supplied a Handler that will be executed
@@ -82,6 +90,7 @@ type Consumer struct {
 	messagesRequeued uint64
 	totalRdyCount    int64
 	backoffDuration  int64
+	backoffCounter   int32
 	maxInFlight      int32
 
 	mtx sync.RWMutex
@@ -101,8 +110,7 @@ type Consumer struct {
 
 	needRDYRedistributed int32
 
-	backoffMtx     sync.RWMutex
-	backoffCounter int32
+	backoffMtx sync.RWMutex
 
 	incomingMessages chan *Message
 
@@ -634,95 +642,15 @@ func (r *Consumer) onConnMessageRequeued(c *Conn, msg *Message) {
 }
 
 func (r *Consumer) onConnBackoff(c *Conn) {
-	r.startStopContinueBackoff(c, false)
+	r.startStopContinueBackoff(c, backoffFlag)
+}
+
+func (r *Consumer) onConnContinue(c *Conn) {
+	r.startStopContinueBackoff(c, continueFlag)
 }
 
 func (r *Consumer) onConnResume(c *Conn) {
-	r.startStopContinueBackoff(c, true)
-}
-
-func (r *Consumer) startStopContinueBackoff(conn *Conn, success bool) {
-	// prevent many async failures/successes from immediately resulting in
-	// max backoff/normal rate (by ensuring that we dont continually incr/decr
-	// the counter during a backoff period)
-	if r.inBackoffBlock() {
-		return
-	}
-
-	// update backoff state
-	r.backoffMtx.Lock()
-	backoffUpdated := false
-	if success {
-		if r.backoffCounter > 0 {
-			r.backoffCounter--
-			backoffUpdated = true
-		}
-	} else {
-		maxBackoffCount := int32(math.Max(1, math.Ceil(
-			math.Log2(r.config.MaxBackoffDuration.Seconds()))))
-		if r.backoffCounter < maxBackoffCount {
-			r.backoffCounter++
-			backoffUpdated = true
-		}
-	}
-	r.backoffMtx.Unlock()
-
-	if r.backoffCounter == 0 && backoffUpdated {
-		// exit backoff
-		count := r.perConnMaxInFlight()
-		r.log(LogLevelWarning, "exiting backoff, returning all to RDY %d", count)
-		for _, c := range r.conns() {
-			r.updateRDY(c, count)
-		}
-	} else if r.backoffCounter > 0 {
-		// start or continue backoff
-		backoffDuration := r.config.BackoffStrategy.Calculate(int(r.backoffCounter))
-		atomic.StoreInt64(&r.backoffDuration, backoffDuration.Nanoseconds())
-		time.AfterFunc(backoffDuration, r.backoff)
-
-		r.log(LogLevelWarning, "backing off for %.04f seconds (backoff level %d), setting all to RDY 0",
-			backoffDuration.Seconds(), r.backoffCounter)
-
-		// send RDY 0 immediately (to *all* connections)
-		for _, c := range r.conns() {
-			r.updateRDY(c, 0)
-		}
-	}
-}
-
-func (r *Consumer) backoff() {
-
-	if atomic.LoadInt32(&r.stopFlag) == 1 {
-		atomic.StoreInt64(&r.backoffDuration, 0)
-		return
-	}
-
-	// pick a random connection to test the waters
-	conns := r.conns()
-	if len(conns) == 0 {
-		// backoff again
-		backoffDuration := 1 * time.Second
-		atomic.StoreInt64(&r.backoffDuration, backoffDuration.Nanoseconds())
-		time.AfterFunc(backoffDuration, r.backoff)
-		return
-	}
-	idx := r.rng.Intn(len(conns))
-	choice := conns[idx]
-
-	r.log(LogLevelWarning,
-		"(%s) backoff timeout expired, sending RDY 1",
-		choice.String())
-	// while in backoff only ever let 1 message at a time through
-	err := r.updateRDY(choice, 1)
-	if err != nil {
-		r.log(LogLevelWarning, "(%s) error updating RDY - %s", choice.String(), err)
-		backoffDuration := 1 * time.Second
-		atomic.StoreInt64(&r.backoffDuration, backoffDuration.Nanoseconds())
-		time.AfterFunc(backoffDuration, r.backoff)
-		return
-	}
-
-	atomic.StoreInt64(&r.backoffDuration, 0)
+	r.startStopContinueBackoff(c, resumeFlag)
 }
 
 func (r *Consumer) onConnResponse(c *Conn, data []byte) {
@@ -823,19 +751,104 @@ func (r *Consumer) onConnClose(c *Conn) {
 	}
 }
 
-func (r *Consumer) inBackoff() bool {
-	r.backoffMtx.RLock()
-	backoffCounter := r.backoffCounter
-	r.backoffMtx.RUnlock()
-	return backoffCounter > 0
+func (r *Consumer) startStopContinueBackoff(conn *Conn, signal backoffSignal) {
+	// prevent many async failures/successes from immediately resulting in
+	// max backoff/normal rate (by ensuring that we dont continually incr/decr
+	// the counter during a backoff period)
+	r.backoffMtx.Lock()
+	if r.inBackoffTimeout() {
+		r.backoffMtx.Unlock()
+		return
+	}
+	defer r.backoffMtx.Unlock()
+
+	// update backoff state
+	backoffUpdated := false
+	backoffCounter := atomic.LoadInt32(&r.backoffCounter)
+	switch signal {
+	case resumeFlag:
+		if backoffCounter > 0 {
+			backoffCounter--
+			backoffUpdated = true
+		}
+	case backoffFlag:
+		nextBackoff := r.config.BackoffStrategy.Calculate(int(backoffCounter) + 1)
+		if nextBackoff <= r.config.MaxBackoffDuration {
+			backoffCounter++
+			backoffUpdated = true
+		}
+	}
+	atomic.StoreInt32(&r.backoffCounter, backoffCounter)
+
+	if r.backoffCounter == 0 && backoffUpdated {
+		// exit backoff
+		count := r.perConnMaxInFlight()
+		r.log(LogLevelWarning, "exiting backoff, returning all to RDY %d", count)
+		for _, c := range r.conns() {
+			r.updateRDY(c, count)
+		}
+	} else if r.backoffCounter > 0 {
+		// start or continue backoff
+		backoffDuration := r.config.BackoffStrategy.Calculate(int(backoffCounter))
+
+		r.log(LogLevelWarning, "backing off for %.04f seconds (backoff level %d), setting all to RDY 0",
+			backoffDuration.Seconds(), backoffCounter)
+
+		// send RDY 0 immediately (to *all* connections)
+		for _, c := range r.conns() {
+			r.updateRDY(c, 0)
+		}
+
+		r.backoff(backoffDuration)
+	}
 }
 
-func (r *Consumer) inBackoffBlock() bool {
+func (r *Consumer) backoff(d time.Duration) {
+	atomic.StoreInt64(&r.backoffDuration, d.Nanoseconds())
+	time.AfterFunc(d, r.resume)
+}
+
+func (r *Consumer) resume() {
+	if atomic.LoadInt32(&r.stopFlag) == 1 {
+		atomic.StoreInt64(&r.backoffDuration, 0)
+		return
+	}
+
+	// pick a random connection to test the waters
+	conns := r.conns()
+	if len(conns) == 0 {
+		// backoff again
+		r.backoff(time.Second)
+		return
+	}
+	idx := r.rng.Intn(len(conns))
+	choice := conns[idx]
+
+	r.log(LogLevelWarning,
+		"(%s) backoff timeout expired, sending RDY 1",
+		choice.String())
+
+	// while in backoff only ever let 1 message at a time through
+	err := r.updateRDY(choice, 1)
+	if err != nil {
+		r.log(LogLevelWarning, "(%s) error updating RDY - %s", choice.String(), err)
+		r.backoff(time.Second)
+		return
+	}
+
+	atomic.StoreInt64(&r.backoffDuration, 0)
+}
+
+func (r *Consumer) inBackoff() bool {
+	return atomic.LoadInt32(&r.backoffCounter) > 0
+}
+
+func (r *Consumer) inBackoffTimeout() bool {
 	return atomic.LoadInt64(&r.backoffDuration) > 0
 }
 
 func (r *Consumer) maybeUpdateRDY(conn *Conn) {
-	if r.inBackoff() || r.inBackoffBlock() {
+	if r.inBackoff() || r.inBackoffTimeout() {
 		return
 	}
 
@@ -932,7 +945,7 @@ func (r *Consumer) sendRDY(c *Conn, count int64) error {
 }
 
 func (r *Consumer) redistributeRDY() {
-	if r.inBackoffBlock() {
+	if r.inBackoffTimeout() {
 		return
 	}
 
