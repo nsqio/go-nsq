@@ -118,6 +118,8 @@ type Config struct {
 	MaxRequeueDelay     time.Duration `opt:"max_requeue_delay" min:"0" max:"60m" default:"15m"`
 	DefaultRequeueDelay time.Duration `opt:"default_requeue_delay" min:"0" max:"60m" default:"90s"`
 
+	// Backoff enabled, defaults to true. Setting this to false disables backoff entirely.
+	BackoffEnabled bool `opt:"backoff_enabled" default:"true"`
 	// Backoff strategy, defaults to exponential backoff. Overwrite this to define alternative backoff algrithms.
 	BackoffStrategy BackoffStrategy `opt:"backoff_strategy" default:"exponential"`
 	// Maximum amount of time to backoff when processing fails 0 == no backoff

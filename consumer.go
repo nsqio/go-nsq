@@ -642,6 +642,11 @@ func (r *Consumer) onConnResume(c *Conn) {
 }
 
 func (r *Consumer) startStopContinueBackoff(conn *Conn, success bool) {
+	// allows backoff to be completely disabled
+	if !r.config.BackoffEnabled {
+		return
+	}
+
 	// prevent many async failures/successes from immediately resulting in
 	// max backoff/normal rate (by ensuring that we dont continually incr/decr
 	// the counter during a backoff period)

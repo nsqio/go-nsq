@@ -44,6 +44,15 @@ func TestConfigSet(t *testing.T) {
 	if c.LocalAddr.String() != "1.2.3.4:27015" {
 		t.Error("Failed to assign `local_addr` config")
 	}
+	if c.BackoffEnabled != true {
+		t.Errorf("Failed to set default `true` backoff_enabled")
+	}
+	if err := c.Set("backoff_enabled", "false"); err != nil {
+		t.Error("Error setting `backoff_strategy` config: %s", err)
+	}
+	if c.BackoffEnabled != false {
+		t.Errorf("Failed to set `false` backoff_enabled")
+	}
 	if reflect.ValueOf(c.BackoffStrategy).Type().String() != "*nsq.ExponentialStrategy" {
 		t.Error("Failed to set default `exponential` backoff strategy")
 	}
