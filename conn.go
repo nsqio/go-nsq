@@ -563,14 +563,14 @@ func (c *Conn) writeLoop() {
 			if resp.success {
 				c.log(LogLevelDebug, "FIN %s", resp.msg.ID)
 				c.delegate.OnMessageFinished(c, resp.msg)
-				if resp.backoff {
-					c.delegate.OnResume(c)
-				}
+				c.delegate.OnResume(c)
 			} else {
 				c.log(LogLevelDebug, "REQ %s", resp.msg.ID)
 				c.delegate.OnMessageRequeued(c, resp.msg)
 				if resp.backoff {
 					c.delegate.OnBackoff(c)
+				} else {
+					c.delegate.OnContinue(c)
 				}
 			}
 
@@ -683,7 +683,7 @@ func (c *Conn) waitForCleanup() {
 }
 
 func (c *Conn) onMessageFinish(m *Message) {
-	c.msgResponseChan <- &msgResponse{m, Finish(m.ID), true, true}
+	c.msgResponseChan <- &msgResponse{msg: m, cmd: Finish(m.ID), success: true}
 }
 
 func (c *Conn) onMessageRequeue(m *Message, delay time.Duration, backoff bool) {
@@ -695,7 +695,7 @@ func (c *Conn) onMessageRequeue(m *Message, delay time.Duration, backoff bool) {
 			delay = c.config.MaxRequeueDelay
 		}
 	}
-	c.msgResponseChan <- &msgResponse{m, Requeue(m.ID, delay), false, backoff}
+	c.msgResponseChan <- &msgResponse{msg: m, cmd: Requeue(m.ID, delay), success: false, backoff: backoff}
 }
 
 func (c *Conn) onMessageTouch(m *Message) {
