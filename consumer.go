@@ -817,7 +817,8 @@ func (r *Consumer) resume() {
 	// pick a random connection to test the waters
 	conns := r.conns()
 	if len(conns) == 0 {
-		// backoff again
+		r.log(LogLevelWarning, "no connection available to resume")
+		r.log(LogLevelWarning, "backing off for %.04f seconds", 1)
 		r.backoff(time.Second)
 		return
 	}
@@ -831,7 +832,8 @@ func (r *Consumer) resume() {
 	// while in backoff only ever let 1 message at a time through
 	err := r.updateRDY(choice, 1)
 	if err != nil {
-		r.log(LogLevelWarning, "(%s) error updating RDY - %s", choice.String(), err)
+		r.log(LogLevelWarning, "(%s) error resuming RDY 1 - %s", choice.String(), err)
+		r.log(LogLevelWarning, "backing off for %.04f seconds", 1)
 		r.backoff(time.Second)
 		return
 	}
@@ -848,7 +850,11 @@ func (r *Consumer) inBackoffTimeout() bool {
 }
 
 func (r *Consumer) maybeUpdateRDY(conn *Conn) {
-	if r.inBackoff() || r.inBackoffTimeout() {
+	inBackoff := r.inBackoff()
+	inBackoffTimeout := r.inBackoffTimeout()
+	if inBackoff || inBackoffTimeout {
+		r.log(LogLevelDebug, "(%s) skip sending RDY inBackoff:%v || inBackoffTimeout:%v",
+			conn, inBackoff, inBackoffTimeout)
 		return
 	}
 

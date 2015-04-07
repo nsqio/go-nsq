@@ -51,7 +51,7 @@ func TestProducerConnection(t *testing.T) {
 
 	err := w.Publish("write_test", []byte("test"))
 	if err != nil {
-		t.Fatalf("should lazily connect")
+		t.Fatalf("should lazily connect - %s", err)
 	}
 
 	conn := w.conn.(*Conn)
