@@ -728,8 +728,8 @@ func (r *Consumer) onConnClose(c *Conn) {
 		// try to reconnect after a bit
 		go func(addr string) {
 			for {
-				r.log(LogLevelInfo, "(%s) re-connecting in 15 seconds...", addr)
-				time.Sleep(15 * time.Second)
+				r.log(LogLevelInfo, "(%s) re-connecting in %.04f seconds...", addr, r.config.LookupdPollInterval)
+				time.Sleep(r.config.LookupdPollInterval)
 				if atomic.LoadInt32(&r.stopFlag) == 1 {
 					break
 				}
@@ -868,7 +868,7 @@ func (r *Consumer) maybeUpdateRDY(conn *Conn) {
 }
 
 func (r *Consumer) rdyLoop() {
-	redistributeTicker := time.NewTicker(5 * time.Second)
+	redistributeTicker := time.NewTicker(r.config.RDYRedistributeInterval)
 
 	for {
 		select {
