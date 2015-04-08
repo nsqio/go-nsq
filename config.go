@@ -111,7 +111,10 @@ type Config struct {
 	// Duration between polling lookupd for new producers, and fractional jitter to add to
 	// the lookupd pool loop. this helps evenly distribute requests even if multiple consumers
 	// restart at the same time
-	LookupdPollInterval time.Duration `opt:"lookupd_poll_interval" min:"5s" max:"5m" default:"60s"`
+	//
+	// NOTE: when not using nsqlookupd, LookupdPollInterval represents the duration of time between
+	// reconnection attempts
+	LookupdPollInterval time.Duration `opt:"lookupd_poll_interval" min:"10ms" max:"5m" default:"60s"`
 	LookupdPollJitter   float64       `opt:"lookupd_poll_jitter" min:"0" max:"1" default:"0.3"`
 
 	// Maximum duration when REQueueing (for doubling of deferred requeue)
@@ -128,9 +131,12 @@ type Config struct {
 	// Maximum number of times this consumer will attempt to process a message before giving up
 	MaxAttempts uint16 `opt:"max_attempts" min:"0" max:"65535" default:"5"`
 
-	// Amount of time in seconds to wait for a message from a producer when in a state where RDY
+	// Duration to wait for a message from a producer when in a state where RDY
 	// counts are re-distributed (ie. max_in_flight < num_producers)
 	LowRdyIdleTimeout time.Duration `opt:"low_rdy_idle_timeout" min:"1s" max:"5m" default:"10s"`
+
+	// Duration between redistributing max-in-flight to connections
+	RDYRedistributeInterval time.Duration `opt:"rdy_redistribute_interval" min:"1ms" max:"5s" default:"5s"`
 
 	// Identifiers sent to nsqd representing this client
 	// UserAgent is in the spirit of HTTP (default: "<client_library_name>/<version>")

@@ -728,8 +728,8 @@ func (r *Consumer) onConnClose(c *Conn) {
 		// try to reconnect after a bit
 		go func(addr string) {
 			for {
-				r.log(LogLevelInfo, "(%s) re-connecting in 15 seconds...", addr)
-				time.Sleep(15 * time.Second)
+				r.log(LogLevelInfo, "(%s) re-connecting in %.04f seconds...", addr, r.config.LookupdPollInterval)
+				time.Sleep(r.config.LookupdPollInterval)
 				if atomic.LoadInt32(&r.stopFlag) == 1 {
 					break
 				}
@@ -817,7 +817,8 @@ func (r *Consumer) resume() {
 	// pick a random connection to test the waters
 	conns := r.conns()
 	if len(conns) == 0 {
-		// backoff again
+		r.log(LogLevelWarning, "no connection available to resume")
+		r.log(LogLevelWarning, "backing off for %.04f seconds", 1)
 		r.backoff(time.Second)
 		return
 	}
@@ -831,7 +832,8 @@ func (r *Consumer) resume() {
 	// while in backoff only ever let 1 message at a time through
 	err := r.updateRDY(choice, 1)
 	if err != nil {
-		r.log(LogLevelWarning, "(%s) error updating RDY - %s", choice.String(), err)
+		r.log(LogLevelWarning, "(%s) error resuming RDY 1 - %s", choice.String(), err)
+		r.log(LogLevelWarning, "backing off for %.04f seconds", 1)
 		r.backoff(time.Second)
 		return
 	}
@@ -848,7 +850,11 @@ func (r *Consumer) inBackoffTimeout() bool {
 }
 
 func (r *Consumer) maybeUpdateRDY(conn *Conn) {
-	if r.inBackoff() || r.inBackoffTimeout() {
+	inBackoff := r.inBackoff()
+	inBackoffTimeout := r.inBackoffTimeout()
+	if inBackoff || inBackoffTimeout {
+		r.log(LogLevelDebug, "(%s) skip sending RDY inBackoff:%v || inBackoffTimeout:%v",
+			conn, inBackoff, inBackoffTimeout)
 		return
 	}
 
@@ -868,7 +874,7 @@ func (r *Consumer) maybeUpdateRDY(conn *Conn) {
 }
 
 func (r *Consumer) rdyLoop() {
-	redistributeTicker := time.NewTicker(5 * time.Second)
+	redistributeTicker := time.NewTicker(r.config.RDYRedistributeInterval)
 
 	for {
 		select {
@@ -949,16 +955,22 @@ func (r *Consumer) redistributeRDY() {
 		return
 	}
 
-	numConns := int32(len(r.conns()))
+	// if an external heuristic set needRDYRedistributed we want to wait
+	// until we can actually redistribute to proceed
+	conns := r.conns()
+	if len(conns) == 0 {
+		return
+	}
+
 	maxInFlight := r.getMaxInFlight()
-	if numConns > maxInFlight {
+	if len(conns) > int(maxInFlight) {
 		r.log(LogLevelDebug, "redistributing RDY state (%d conns > %d max_in_flight)",
-			numConns, maxInFlight)
+			len(conns), maxInFlight)
 		atomic.StoreInt32(&r.needRDYRedistributed, 1)
 	}
 
-	if r.inBackoff() && numConns > 1 {
-		r.log(LogLevelDebug, "redistributing RDY state (in backoff and %d conns > 1)", numConns)
+	if r.inBackoff() && len(conns) > 1 {
+		r.log(LogLevelDebug, "redistributing RDY state (in backoff and %d conns > 1)", len(conns))
 		atomic.StoreInt32(&r.needRDYRedistributed, 1)
 	}
 
@@ -966,7 +978,6 @@ func (r *Consumer) redistributeRDY() {
 		return
 	}
 
-	conns := r.conns()
 	possibleConns := make([]*Conn, 0, len(conns))
 	for _, c := range conns {
 		lastMsgDuration := time.Now().Sub(c.LastMessageTime())
