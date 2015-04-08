@@ -243,7 +243,11 @@ func (w *Producer) connect() error {
 		return ErrStopped
 	}
 
-	if !atomic.CompareAndSwapInt32(&w.state, StateInit, StateConnected) {
+	switch state := atomic.LoadInt32(&w.state); state {
+	case StateInit:
+	case StateConnected:
+		return nil
+	default:
 		return ErrNotConnected
 	}
 
@@ -258,9 +262,9 @@ func (w *Producer) connect() error {
 	if err != nil {
 		w.conn.Close()
 		w.log(LogLevelError, "(%s) error connecting to nsqd - %s", w.addr, err)
-		atomic.StoreInt32(&w.state, StateInit)
 		return err
 	}
+	atomic.StoreInt32(&w.state, StateConnected)
 	w.closeChan = make(chan int)
 	w.wg.Add(1)
 	go w.router()
