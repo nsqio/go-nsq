@@ -4,6 +4,7 @@
 
 **Upgrading from 1.0.3**: There are no backward incompatible changes.
 
+ * #133 - fix `ErrNotConnected` race during `Producer` connection (thanks @jeddenlea)
  * #132 - fix `RDY` redistribution after backoff with no connections
  * #128 - fix backoff stall when using `RequeueWithoutBackoff`
  * #127 - fix handling of connection closing when resuming after backoff (thanks @jnewmano)
