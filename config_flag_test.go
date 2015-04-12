@@ -3,19 +3,19 @@ package nsq_test
 import (
 	"flag"
 
-	"github.com/bitly/go-nsq"
+	"github.com/nsqio/go-nsq"
 )
 
 func ExampleConfigFlag() {
 	cfg := nsq.NewConfig()
 	flagSet := flag.NewFlagSet("", flag.ExitOnError)
 
-	flagSet.Var(&nsq.ConfigFlag{cfg}, "consumer.options", "option to passthrough to nsq.Consumer (may be given multiple times, http://godoc.org/github.com/bitly/go-nsq#Config.Set)")
+	flagSet.Var(&nsq.ConfigFlag{cfg}, "consumer-opt", "option to pass through to nsq.Consumer (may be given multiple times)")
 	flagSet.PrintDefaults()
 
 	err := flagSet.Parse([]string{
-		"-consumer.options=heartbeat_interval,1s",
-		"-consumer.options=max_attempts,10",
+		"--consumer-opt=heartbeat_interval,1s",
+		"--consumer-opt=max_attempts,10",
 	})
 	if err != nil {
 		panic(err.Error())
