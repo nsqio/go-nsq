@@ -86,7 +86,7 @@ func (c *Command) WriteTo(w io.Writer) (int64, error) {
 // The supplied map is marshaled into JSON to provide some flexibility
 // for this command to evolve over time.
 //
-// See http://bitly.github.io/nsq/clients/tcp_protocol_spec.html#identify for information
+// See http://nsq.io/clients/tcp_protocol_spec.html#identify for information
 // on the supported options
 func Identify(js map[string]interface{}) (*Command, error) {
 	body, err := json.Marshal(js)
