@@ -431,6 +431,21 @@ func (r *Consumer) nextLookupdEndpoint() string {
 	return u.String()
 }
 
+type lookupResp struct {
+	Channels  []string    `json:"channels"`
+	Producers []*peerInfo `json:"producers"`
+	Timestamp int64       `json:"timestamp"`
+}
+
+type peerInfo struct {
+	RemoteAddress    string `json:"remote_address"`
+	Hostname         string `json:"hostname"`
+	BroadcastAddress string `json:"broadcast_address"`
+	TCPPort          int    `json:"tcp_port"`
+	HTTPPort         int    `json:"http_port"`
+	Version          string `json:"version"`
+}
+
 // make an HTTP req to one of the configured nsqlookupd instances to discover
 // which nsqd's provide the topic we are consuming.
 //
@@ -440,28 +455,17 @@ func (r *Consumer) queryLookupd() {
 
 	r.log(LogLevelInfo, "querying nsqlookupd %s", endpoint)
 
-	data, err := apiRequestNegotiateV1("GET", endpoint, nil)
+	var data lookupResp
+	err := apiRequestNegotiateV1("GET", endpoint, nil, &data)
 	if err != nil {
 		r.log(LogLevelError, "error querying nsqlookupd (%s) - %s", endpoint, err)
 		return
 	}
 
-	// {
-	//     "channels": [],
-	//     "producers": [
-	//         {
-	//             "broadcast_address": "jehiah-air.local",
-	//             "http_port": 4151,
-	//             "tcp_port": 4150
-	//         }
-	//     ],
-	//     "timestamp": 1340152173
-	// }
 	nsqdAddrs := make([]string, 0)
-	for i := range data.Get("producers").MustArray() {
-		producer := data.Get("producers").GetIndex(i)
-		broadcastAddress := producer.Get("broadcast_address").MustString()
-		port := producer.Get("tcp_port").MustInt()
+	for _, producer := range data.Producers {
+		broadcastAddress := producer.BroadcastAddress
+		port := producer.TCPPort
 		joined := net.JoinHostPort(broadcastAddress, strconv.Itoa(port))
 		nsqdAddrs = append(nsqdAddrs, joined)
 	}

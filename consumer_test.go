@@ -3,6 +3,7 @@ package nsq
 import (
 	"bytes"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -14,8 +15,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/bitly/go-simplejson"
 )
 
 type MyTestHandler struct {
@@ -39,12 +38,16 @@ func (h *MyTestHandler) HandleMessage(message *Message) error {
 		return errors.New("fail this message")
 	}
 
-	data, err := simplejson.NewJson(message.Body)
+	data := struct {
+		Msg string
+	}{}
+
+	err := json.Unmarshal(message.Body, &data)
 	if err != nil {
 		return err
 	}
 
-	msg, _ := data.Get("msg").String()
+	msg := data.Msg
 	if msg != "single" && msg != "double" {
 		h.t.Error("message 'action' was not correct: ", msg, data)
 	}
