@@ -1,14 +1,13 @@
 package nsq
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
 	"time"
-
-	"github.com/bitly/go-simplejson"
 )
 
 type deadlinedConn struct {
@@ -39,40 +38,53 @@ func newDeadlineTransport(timeout time.Duration) *http.Transport {
 	return transport
 }
 
-func apiRequestNegotiateV1(method string, endpoint string, body io.Reader) (*simplejson.Json, error) {
+type wrappedResp struct {
+	Status     string      `json:"status_txt"`
+	StatusCode int         `json:"status_code"`
+	Data       interface{} `json:"data"`
+}
+
+// stores the result in the value pointed to by ret(must be a pointer)
+func apiRequestNegotiateV1(method string, endpoint string, body io.Reader, ret interface{}) error {
 	httpclient := &http.Client{Transport: newDeadlineTransport(2 * time.Second)}
 	req, err := http.NewRequest(method, endpoint, body)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	req.Header.Add("Accept", "application/vnd.nsq; version=1.0")
 
 	resp, err := httpclient.Do(req)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	respBody, err := ioutil.ReadAll(resp.Body)
 	resp.Body.Close()
 	if err != nil {
-		return nil, err
+		return err
 	}
+
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("got response %s %q", resp.Status, respBody)
+		return fmt.Errorf("got response %s %q", resp.Status, respBody)
 	}
 
 	if len(respBody) == 0 {
 		respBody = []byte("{}")
 	}
 
-	data, err := simplejson.NewJson(respBody)
-	if err != nil {
-		return nil, err
+	if resp.Header.Get("X-NSQ-Content-Type") == "nsq; version=1.0" {
+		return json.Unmarshal(respBody, ret)
 	}
 
-	if resp.Header.Get("X-NSQ-Content-Type") == "nsq; version=1.0" {
-		return data, nil
+	wResp := &wrappedResp{
+		Data: ret,
 	}
-	return data.Get("data"), nil
+
+	if err = json.Unmarshal(respBody, wResp); err != nil {
+		return err
+	}
+
+	// wResp.StatusCode here is equal to resp.StatusCode, so ignore it
+	return nil
 }
