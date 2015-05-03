@@ -133,8 +133,15 @@ func Publish(topic string, body []byte) *Command {
 	return &Command{[]byte("PUB"), params, body}
 }
 
-// MultiPublish creates a new Command to write more than one message to a given topic.
-// This is useful for high-throughput situations to avoid roundtrips and saturate the pipe.
+// DeferredPublish creates a new Command to write a message to a given topic
+// where the message will queue at the channel level until the timeout expires
+func DeferredPublish(topic string, delay time.Duration, body []byte) *Command {
+	var params = [][]byte{[]byte(topic), []byte(strconv.Itoa(int(delay / time.Millisecond)))}
+	return &Command{[]byte("DPUB"), params, body}
+}
+
+// MultiPublish creates a new Command to write more than one message to a given topic
+// (useful for high-throughput situations to avoid roundtrips and saturate the pipe)
 func MultiPublish(topic string, bodies [][]byte) (*Command, error) {
 	var params = [][]byte{[]byte(topic)}
 
