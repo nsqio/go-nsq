@@ -544,7 +544,7 @@ func coerce(v interface{}, typ reflect.Type) (reflect.Value, error) {
 		v, err = coerceBackoffStrategy(v)
 	default:
 		v = nil
-		err = errors.New(fmt.Sprintf("invalid type %s", typ.String()))
+		err = fmt.Errorf("invalid type %s", typ.String())
 	}
 	return valueTypeCoerce(v, typ), err
 }
@@ -576,10 +576,8 @@ func coerceString(v interface{}) (string, error) {
 		return fmt.Sprintf("%d", v), nil
 	case float32, float64:
 		return fmt.Sprintf("%f", v), nil
-	default:
-		return fmt.Sprintf("%s", v), nil
 	}
-	return "", errors.New("invalid value type")
+	return fmt.Sprintf("%s", v), nil
 }
 
 func coerceDuration(v interface{}) (time.Duration, error) {
