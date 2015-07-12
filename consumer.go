@@ -795,6 +795,10 @@ func (r *Consumer) startStopContinueBackoff(conn *Conn, signal backoffSignal) {
 		// start or continue backoff
 		backoffDuration := r.config.BackoffStrategy.Calculate(int(backoffCounter))
 
+		if backoffDuration > r.config.MaxBackoffDuration {
+			backoffDuration = r.config.MaxBackoffDuration
+		}
+
 		r.log(LogLevelWarning, "backing off for %.04f seconds (backoff level %d), setting all to RDY 0",
 			backoffDuration.Seconds(), backoffCounter)
 
