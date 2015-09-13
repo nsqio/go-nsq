@@ -16,6 +16,10 @@ See [godoc][nsq_gopkgdoc].
 
 See the [main repo apps][apps] directory for examples of clients built using this package.
 
+### Tests
+
+Tests are run via `./test.sh` (which requires `nsqd` and `nsqlookupd` to be installed)
+
 [nsq]: https://github.com/nsqio/nsq
 [nsq_gopkgdoc]: http://godoc.org/github.com/nsqio/go-nsq
 [apps]: https://github.com/nsqio/nsq/tree/master/apps
