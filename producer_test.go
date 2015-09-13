@@ -40,18 +40,27 @@ func (h *ConsumerHandler) HandleMessage(message *Message) error {
 	return nil
 }
 
+// requires that nsdq be running on 127.0.0.1:4150
 func TestProducerConnection(t *testing.T) {
 	config := NewConfig()
-	laddr := "127.0.0.2"
+	laddr := "127.0.0.1"
 
-	config.LocalAddr, _ = net.ResolveTCPAddr("tcp", laddr+":0")
+	var err error
+	config.LocalAddr, err = net.ResolveTCPAddr("tcp", laddr+":0")
+	if err != nil {
+		t.Fatalf("could not ResolveTCPAddr '%s' - %s", laddr+":0", err)
+	}
 
-	w, _ := NewProducer("127.0.0.1:4150", config)
+	paddr := "127.0.0.1:4150"
+	w, err := NewProducer(paddr, config)
+	if err != nil {
+		t.Fatalf("NewProducer('%s') failed with error '%s'", paddr, err)
+	}
 	w.SetLogger(nullLogger, LogLevelInfo)
 
-	err := w.Publish("write_test", []byte("test"))
+	err = w.Publish("write_test", []byte("test"))
 	if err != nil {
-		t.Fatalf("should lazily connect - %s", err)
+		t.Fatalf("should lazily connect but got error '%s': Have you started nsqd on '%s' for this test? This is required.", err, paddr)
 	}
 
 	conn := w.conn.(*Conn)
