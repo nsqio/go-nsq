@@ -1,5 +1,15 @@
 ## go-nsq Change Log
 
+### 1.0.5-alpha
+
+**Upgrading from 1.0.4**: There are no backward incompatible changes.
+
+ * #156 - consumer: prevent data race on RNG
+ * #155 - config: support `flag.Value` interface
+ * #147/#150 - consumer: fix application of `max_backoff_duration` (thanks @judwhite)
+ * #138 - fix lint, vet, fmt issues
+ * #137 - remove `go-simplejson` dependency
+
 ### 1.0.4 - 2015-04-07
 
 **Upgrading from 1.0.3**: There are no backward incompatible changes.
