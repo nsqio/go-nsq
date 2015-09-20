@@ -2,7 +2,7 @@
 
 The official Go package for [NSQ][nsq].
 
-[![Build Status](https://secure.travis-ci.org/nsqio/go-nsq.png?branch=master)][travis] [![GoDoc](https://godoc.org/github.com/nsqio/go-nsq?status.svg)](https://godoc.org/github.com/nsqio/go-nsq)
+[![Build Status](https://secure.travis-ci.org/nsqio/go-nsq.svg?branch=master)][travis] [![GoDoc](https://godoc.org/github.com/nsqio/go-nsq?status.svg)](https://godoc.org/github.com/nsqio/go-nsq)
 
 The latest stable release is **[1.0.5][latest_tag]**.
 
