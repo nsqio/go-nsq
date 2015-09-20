@@ -42,7 +42,7 @@ func (h *ConsumerHandler) HandleMessage(message *Message) error {
 
 func TestProducerConnection(t *testing.T) {
 	config := NewConfig()
-	laddr := "127.0.0.2"
+	laddr := "127.0.0.1"
 
 	config.LocalAddr, _ = net.ResolveTCPAddr("tcp", laddr+":0")
 
