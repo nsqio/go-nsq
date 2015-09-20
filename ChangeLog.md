@@ -1,6 +1,6 @@
 ## go-nsq Change Log
 
-### 1.0.5-alpha
+### 1.0.5 - 2015-09-19
 
 **Upgrading from 1.0.4**: There are no backward incompatible changes.
 
