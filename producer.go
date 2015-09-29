@@ -195,6 +195,26 @@ func (w *Producer) MultiPublish(topic string, body [][]byte) error {
 	return w.sendCommand(cmd)
 }
 
+// DeferredPublish synchronously publishes a message body to the specified topic
+// where the message will queue at the channel level until the timeout expires, returning
+// an error if publish failed
+func (w *Producer) DeferredPublish(topic string, delay time.Duration, body []byte) error {
+	return w.sendCommand(DeferredPublish(topic, delay, body))
+}
+
+// DeferredPublishAsync publishes a message body to the specified topic
+// where the message will queue at the channel level until the timeout expires
+// but does not wait for the response from `nsqd`.
+//
+// When the Producer eventually receives the response from `nsqd`,
+// the supplied `doneChan` (if specified)
+// will receive a `ProducerTransaction` instance with the supplied variadic arguments
+// and the response error if present
+func (w *Producer) DeferredPublishAsync(topic string, delay time.Duration, body []byte,
+	doneChan chan *ProducerTransaction, args ...interface{}) error {
+	return w.sendCommandAsync(DeferredPublish(topic, delay, body), doneChan, args)
+}
+
 func (w *Producer) sendCommand(cmd *Command) error {
 	doneChan := make(chan *ProducerTransaction)
 	err := w.sendCommandAsync(cmd, doneChan, nil)
