@@ -9,7 +9,6 @@ import (
 	"os"
 	"runtime"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -42,7 +41,7 @@ func (h *ConsumerHandler) HandleMessage(message *Message) error {
 
 func TestProducerConnection(t *testing.T) {
 	config := NewConfig()
-	laddr := "127.0.0.2"
+	laddr := "127.0.0.1"
 
 	config.LocalAddr, _ = net.ResolveTCPAddr("tcp", laddr+":0")
 
@@ -52,11 +51,6 @@ func TestProducerConnection(t *testing.T) {
 	err := w.Publish("write_test", []byte("test"))
 	if err != nil {
 		t.Fatalf("should lazily connect - %s", err)
-	}
-
-	conn := w.conn.(*Conn)
-	if !strings.HasPrefix(conn.conn.LocalAddr().String(), laddr) {
-		t.Fatal("producer connection should be bound to specified address:", conn.conn.LocalAddr())
 	}
 
 	w.Stop()
