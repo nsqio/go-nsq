@@ -725,6 +725,10 @@ func (r *Consumer) onConnClose(c *Conn) {
 	reconnect := indexOf(c.String(), r.nsqdTCPAddrs) >= 0
 	r.mtx.RUnlock()
 	if numLookupd > 0 {
+		r.mtx.Lock()
+		idx := indexOf(c.addr, r.nsqdTCPAddrs)
+		r.nsqdTCPAddrs = append(r.nsqdTCPAddrs[:idx], r.nsqdTCPAddrs[idx+1:]...)
+		r.mtx.Unlock()
 		// trigger a poll of the lookupd
 		select {
 		case r.lookupdRecheckChan <- 1:
