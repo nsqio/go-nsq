@@ -63,6 +63,10 @@ func (t *ProducerTransaction) finish() {
 	}
 }
 
+func (t *ProducerTransaction) Cmd() *Command {
+	return t.cmd
+}
+
 // NewProducer returns an instance of Producer for the specified address
 //
 // The only valid way to create a Config is via NewConfig, using a struct literal will panic.
