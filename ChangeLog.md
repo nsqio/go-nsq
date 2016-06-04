@@ -1,5 +1,12 @@
 ## go-nsq Change Log
 
+### 1.0.6 - 2016-06-04
+
+**Upgrading from 1.0.5**: There are no backward incompatible changes.
+
+ * #175 - consumer: reduce garbage generation in DecodeMessage (thanks @Dieterbe)
+ * #162 - producer: support `DeferredPublish` (thanks @DanielHeckrath)
+
 ### 1.0.5 - 2015-09-19
 
 **Upgrading from 1.0.4**: There are no backward incompatible changes.
