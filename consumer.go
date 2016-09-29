@@ -138,6 +138,8 @@ type Consumer struct {
 	// read from this channel to block until consumer is cleanly stopped
 	StopChan chan int
 	exitChan chan int
+
+	CustomBroadcastAddress string
 }
 
 // NewConsumer creates a new instance of Consumer for the specified topic/channel
@@ -449,6 +451,11 @@ type peerInfo struct {
 	Version          string `json:"version"`
 }
 
+/*SetBroadcastAddress is seting up a custom broadcast address for the Consumer*/
+func (r *Consumer) SetBroadcastAddress(address string) {
+	r.CustomBroadcastAddress = address
+}
+
 // make an HTTP req to one of the configured nsqlookupd instances to discover
 // which nsqd's provide the topic we are consuming.
 //
@@ -468,6 +475,9 @@ func (r *Consumer) queryLookupd() {
 	var nsqdAddrs []string
 	for _, producer := range data.Producers {
 		broadcastAddress := producer.BroadcastAddress
+		if length := len(r.CustomBroadcastAddress); length > 0 {
+			broadcastAddress = r.CustomBroadcastAddress
+		}
 		port := producer.TCPPort
 		joined := net.JoinHostPort(broadcastAddress, strconv.Itoa(port))
 		nsqdAddrs = append(nsqdAddrs, joined)
