@@ -479,7 +479,11 @@ func (c *Conn) readLoop() {
 		}
 
 		frameType, data, err := ReadUnpackedResponse(c)
+
 		if err != nil {
+			if err == io.EOF && atomic.LoadInt32(&c.closeFlag) == 1 {
+				goto exit
+			}
 			if !strings.Contains(err.Error(), "use of closed network connection") {
 				c.log(LogLevelError, "IO error - %s", err)
 				c.delegate.OnIOError(c, err)
