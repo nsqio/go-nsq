@@ -15,7 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/mreiferson/go-snappystream"
+	"github.com/golang/snappy"
 )
 
 // IdentifyResponse represents the metadata
@@ -427,8 +427,8 @@ func (c *Conn) upgradeSnappy() error {
 	if c.tlsConn != nil {
 		conn = c.tlsConn
 	}
-	c.r = snappystream.NewReader(conn, snappystream.SkipVerifyChecksum)
-	c.w = snappystream.NewWriter(conn)
+	c.r = snappy.NewReader(conn)
+	c.w = snappy.NewWriter(conn)
 	frameType, data, err := ReadUnpackedResponse(c)
 	if err != nil {
 		return err
