@@ -6,7 +6,7 @@ import (
 
 // ConfigFlag wraps a Config and implements the flag.Value interface
 type ConfigFlag struct {
-	*Config
+	Config *Config
 }
 
 // Set takes a comma separated value and follows the rules in Config.Set
