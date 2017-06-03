@@ -64,6 +64,9 @@ func SendMessage(t *testing.T, port int, topic string, method string, body []byt
 		t.Fatalf(err.Error())
 		return
 	}
+	if resp.StatusCode != 200 {
+		t.Fatalf("%s status code: %d", method, resp.StatusCode)
+	}
 	resp.Body.Close()
 }
 
@@ -165,7 +168,7 @@ func consumerTest(t *testing.T, cb func(c *Config)) {
 	}
 	topicName = topicName + strconv.Itoa(int(time.Now().Unix()))
 	q, _ := NewConsumer(topicName, "ch", config)
-	// q.SetLogger(nullLogger, LogLevelInfo)
+	q.SetLogger(log.New(os.Stderr, "", log.Flags()), LogLevelDebug)
 
 	h := &MyTestHandler{
 		t: t,
@@ -173,9 +176,9 @@ func consumerTest(t *testing.T, cb func(c *Config)) {
 	}
 	q.AddHandler(h)
 
-	SendMessage(t, 4151, topicName, "put", []byte(`{"msg":"single"}`))
-	SendMessage(t, 4151, topicName, "mput", []byte("{\"msg\":\"double\"}\n{\"msg\":\"double\"}"))
-	SendMessage(t, 4151, topicName, "put", []byte("TOBEFAILED"))
+	SendMessage(t, 4151, topicName, "pub", []byte(`{"msg":"single"}`))
+	SendMessage(t, 4151, topicName, "mpub", []byte("{\"msg\":\"double\"}\n{\"msg\":\"double\"}"))
+	SendMessage(t, 4151, topicName, "pub", []byte("TOBEFAILED"))
 	h.messagesSent = 4
 
 	addr := "127.0.0.1:4150"
