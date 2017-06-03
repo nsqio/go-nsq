@@ -994,12 +994,18 @@ func (r *Consumer) redistributeRDY() {
 	possibleConns := make([]*Conn, 0, len(conns))
 	for _, c := range conns {
 		lastMsgDuration := time.Now().Sub(c.LastMessageTime())
+		lastRdyDuration := time.Now().Sub(c.LastRdyTime())
 		rdyCount := c.RDY()
 		r.log(LogLevelDebug, "(%s) rdy: %d (last message received %s)",
 			c.String(), rdyCount, lastMsgDuration)
-		if rdyCount > 0 && lastMsgDuration > r.config.LowRdyIdleTimeout {
-			r.log(LogLevelDebug, "(%s) idle connection, giving up RDY", c.String())
-			r.updateRDY(c, 0)
+		if rdyCount > 0 {
+			if lastMsgDuration > r.config.LowRdyIdleTimeout {
+				r.log(LogLevelDebug, "(%s) idle connection, giving up RDY", c.String())
+				r.updateRDY(c, 0)
+			} else if lastRdyDuration > r.config.LowRdyTimeout {
+				r.log(LogLevelDebug, "(%s) RDY timeout, giving up RDY", c.String())
+				r.updateRDY(c, 0)
+			}
 		}
 		possibleConns = append(possibleConns, c)
 	}
