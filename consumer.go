@@ -454,6 +454,9 @@ type peerInfo struct {
 //
 // initiate a connection to any new producers that are identified.
 func (r *Consumer) queryLookupd() {
+	retries := 0
+
+retry:
 	endpoint := r.nextLookupdEndpoint()
 
 	r.log(LogLevelInfo, "querying nsqlookupd %s", endpoint)
@@ -462,6 +465,11 @@ func (r *Consumer) queryLookupd() {
 	err := apiRequestNegotiateV1("GET", endpoint, nil, &data)
 	if err != nil {
 		r.log(LogLevelError, "error querying nsqlookupd (%s) - %s", endpoint, err)
+		retries++
+		if retries < 3 {
+			r.log(LogLevelInfo, "retrying with next nsqlookupd")
+			goto retry
+		}
 		return
 	}
 

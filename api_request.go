@@ -27,6 +27,7 @@ func (c *deadlinedConn) Write(b []byte) (n int, err error) {
 
 func newDeadlineTransport(timeout time.Duration) *http.Transport {
 	transport := &http.Transport{
+		DisableKeepAlives: true,
 		Dial: func(netw, addr string) (net.Conn, error) {
 			c, err := net.DialTimeout(netw, addr, timeout)
 			if err != nil {

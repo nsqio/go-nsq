@@ -487,7 +487,6 @@ func (c *Conn) readLoop() {
 		}
 
 		frameType, data, err := ReadUnpackedResponse(c)
-
 		if err != nil {
 			if err == io.EOF && atomic.LoadInt32(&c.closeFlag) == 1 {
 				goto exit
