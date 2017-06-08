@@ -98,6 +98,10 @@ type Config struct {
 	ReadTimeout  time.Duration `opt:"read_timeout" min:"100ms" max:"5m" default:"60s"`
 	WriteTimeout time.Duration `opt:"write_timeout" min:"100ms" max:"5m" default:"1s"`
 
+	// Delay packet transmission in hopes of sending fewer packets if TcpNoDelay is false.
+	// In consumer sence, it may improve throughput with FIN feedback.
+	TcpNoDelay bool `opt:"tcp_no_delay" default:"true"`
+
 	// LocalAddr is the local address to use when dialing an nsqd.
 	// If empty, a local address is automatically chosen.
 	LocalAddr net.Addr `opt:"local_addr"`

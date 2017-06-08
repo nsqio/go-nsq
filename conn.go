@@ -151,6 +151,7 @@ func (c *Conn) Connect() (*IdentifyResponse, error) {
 		return nil, err
 	}
 	c.conn = conn.(*net.TCPConn)
+	c.conn.SetNoDelay(c.config.TcpNoDelay)
 	c.r = conn
 	c.w = conn
 
