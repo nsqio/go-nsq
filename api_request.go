@@ -46,8 +46,8 @@ type wrappedResp struct {
 }
 
 // stores the result in the value pointed to by ret(must be a pointer)
-func apiRequestNegotiateV1(method string, endpoint string, body io.Reader, ret interface{}) error {
-	httpclient := &http.Client{Transport: newDeadlineTransport(2 * time.Second)}
+func apiRequestNegotiateV1(method string, endpoint string, body io.Reader, timeout time.Duration, ret interface{}) error {
+	httpclient := &http.Client{Transport: newDeadlineTransport(timeout * time.Second)}
 	req, err := http.NewRequest(method, endpoint, body)
 	if err != nil {
 		return err

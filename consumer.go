@@ -462,7 +462,7 @@ retry:
 	r.log(LogLevelInfo, "querying nsqlookupd %s", endpoint)
 
 	var data lookupResp
-	err := apiRequestNegotiateV1("GET", endpoint, nil, &data)
+	err := apiRequestNegotiateV1("GET", endpoint, nil, r.config.DialTimeout, &data)
 	if err != nil {
 		r.log(LogLevelError, "error querying nsqlookupd (%s) - %s", endpoint, err)
 		retries++
