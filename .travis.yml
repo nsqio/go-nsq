@@ -1,16 +1,14 @@
 language: go
 go:
-  - 1.6.3
-  - 1.7.3
+  - 1.7.6
+  - 1.8.3
 env:
-  - NSQ_DOWNLOAD=nsq-0.3.5.linux-amd64.go1.4.2 GOARCH=amd64
-  - NSQ_DOWNLOAD=nsq-0.3.5.linux-amd64.go1.4.2 GOARCH=386
-  - NSQ_DOWNLOAD=nsq-0.3.6.linux-amd64.go1.5.1 GOARCH=amd64
-  - NSQ_DOWNLOAD=nsq-0.3.6.linux-amd64.go1.5.1 GOARCH=386
   - NSQ_DOWNLOAD=nsq-0.3.7.linux-amd64.go1.6 GOARCH=amd64
   - NSQ_DOWNLOAD=nsq-0.3.7.linux-amd64.go1.6 GOARCH=386
   - NSQ_DOWNLOAD=nsq-0.3.8.linux-amd64.go1.6.2 GOARCH=amd64
   - NSQ_DOWNLOAD=nsq-0.3.8.linux-amd64.go1.6.2 GOARCH=386
+  - NSQ_DOWNLOAD=nsq-1.0.0-compat.linux-amd64.go1.8 GOARCH=amd64
+  - NSQ_DOWNLOAD=nsq-1.0.0-compat.linux-amd64.go1.8 GOARCH=386
 install:
   - go get github.com/golang/snappy
 script:

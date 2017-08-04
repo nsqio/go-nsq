@@ -1,5 +1,15 @@
 ## go-nsq Change Log
 
+### 1.0.7 - 2017-08-04
+
+**Upgrading from 1.0.6**: There are no backward incompatible changes.
+
+ * #97/#209 - consumer: retry nsqlookupd queries
+ * #179/#208 - consumer: redistribute RDY when connections are active
+ * #184/#201 - producer: fix misleading Stop() EOF (thanks @mengskysama)
+ * #203 - switch to golang/snappy (addressing potential snappy related deadlocks)
+ * #202 - consumer: fix backoff logging
+
 ### 1.0.6 - 2016-06-04
 
 **Upgrading from 1.0.5**: There are no backward incompatible changes.
