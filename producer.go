@@ -342,12 +342,19 @@ func (w *Producer) popTransaction(frameType int32, data []byte) {
 }
 
 func (w *Producer) transactionCleanup() {
-	// clean up transactions we can easily account for
-	for _, t := range w.transactions {
-		t.Error = ErrNotConnected
-		t.finish()
+	for {
+		select {
+		case data := <-w.responseChan:
+			w.popTransaction(FrameTypeResponse, data)
+		default:
+			// clean up transactions we can easily account for
+			for _, t := range w.transactions {
+				t.Error = ErrNotConnected
+				t.finish()
+			}
+			w.transactions = w.transactions[:0]
+		}
 	}
-	w.transactions = w.transactions[:0]
 
 	// spin and free up any writes that might have raced
 	// with the cleanup process (blocked on writing
