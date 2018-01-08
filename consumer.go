@@ -884,7 +884,7 @@ func (r *Consumer) maybeUpdateRDY(conn *Conn) {
 	count := r.perConnMaxInFlight()
 
 	// refill when at 1, or at 25%, or if connections have changed and we're imbalanced
-	if remain <= 1 || remain < (lastRdyCount/4) || (count > 0 && count < remain) {
+	if remain <= 1 || remain < (lastRdyCount/4) || (count > 0 && count < remain) || r.getMaxInFlight() == 0 {
 		r.log(LogLevelDebug, "(%s) sending RDY %d (%d remain from last RDY %d)",
 			conn, count, remain, lastRdyCount)
 		r.updateRDY(conn, count)
