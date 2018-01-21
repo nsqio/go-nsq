@@ -223,7 +223,7 @@ func (r *Consumer) SetLogger(l logger, lvl LogLevel) {
 	r.logLvl = lvl
 }
 
-func (r *Consumer) getLogger() (logger, LogLevel) {
+func (r *Consumer) GetLogger() (logger, LogLevel) {
 	r.logGuard.RLock()
 	defer r.logGuard.RUnlock()
 
@@ -523,7 +523,7 @@ func (r *Consumer) ConnectToNSQD(addr string) error {
 
 	atomic.StoreInt32(&r.connectedFlag, 1)
 
-	logger, logLvl := r.getLogger()
+	logger, logLvl := r.GetLogger()
 
 	conn := NewConn(addr, &r.config, &consumerConnDelegate{r})
 	conn.SetLogger(logger, logLvl,
@@ -1162,7 +1162,7 @@ func (r *Consumer) exit() {
 }
 
 func (r *Consumer) log(lvl LogLevel, line string, args ...interface{}) {
-	logger, logLvl := r.getLogger()
+	logger, logLvl := r.GetLogger()
 
 	if logger == nil {
 		return
