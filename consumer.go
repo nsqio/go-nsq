@@ -198,6 +198,11 @@ func (r *Consumer) Stats() *ConsumerStats {
 	}
 }
 
+//Consume return message chan, get message without handler
+func (r *Consumer) Consume() chan *Message {
+	return r.incomingMessages
+}
+
 func (r *Consumer) conns() []*Conn {
 	r.mtx.RLock()
 	conns := make([]*Conn, 0, len(r.connections))
@@ -642,9 +647,9 @@ func (r *Consumer) DisconnectFromNSQLookupd(addr string) error {
 }
 
 func (r *Consumer) onConnMessage(c *Conn, msg *Message) {
+	r.incomingMessages <- msg
 	atomic.AddInt64(&r.totalRdyCount, -1)
 	atomic.AddUint64(&r.messagesReceived, 1)
-	r.incomingMessages <- msg
 	r.maybeUpdateRDY(c)
 }
 
