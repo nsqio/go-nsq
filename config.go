@@ -255,7 +255,7 @@ func (c *Config) setDefaults() error {
 
 type structTagsConfig struct{}
 
-// Handle options that are listed in StructTags
+// HandlesOption handles options that are listed in StructTags
 func (h *structTagsConfig) HandlesOption(c *Config, option string) bool {
 	val := reflect.ValueOf(c).Elem()
 	typ := val.Type()
