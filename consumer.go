@@ -645,7 +645,6 @@ func (r *Consumer) onConnMessage(c *Conn, msg *Message) {
 	atomic.AddInt64(&r.totalRdyCount, -1)
 	atomic.AddUint64(&r.messagesReceived, 1)
 	r.incomingMessages <- msg
-	r.maybeUpdateRDY(c)
 }
 
 func (r *Consumer) onConnMessageFinished(c *Conn, msg *Message) {

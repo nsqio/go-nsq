@@ -263,7 +263,6 @@ func TestConsumerBackoff(t *testing.T) {
 		fmt.Sprintf("FIN %s", msgIDGood),
 		fmt.Sprintf("FIN %s", msgIDGood),
 		fmt.Sprintf("FIN %s", msgIDGood),
-		"RDY 5",
 		"RDY 0",
 		fmt.Sprintf("REQ %s 0", msgIDBad),
 		"RDY 1",
@@ -336,7 +335,6 @@ func TestConsumerRequeueNoBackoff(t *testing.T) {
 	expected := []string{
 		"IDENTIFY",
 		"SUB " + topicName + " ch",
-		"RDY 1",
 		"RDY 1",
 		"RDY 0",
 		fmt.Sprintf("REQ %s 0", msgIDRequeue),
