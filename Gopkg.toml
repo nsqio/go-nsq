@@ -23,4 +23,4 @@
 
 [[constraint]]
   name = "github.com/golang/snappy"
-  revision = "d9eb7a3d35ec988b8585d4a0068e462c27d28380"
+  revision = "v0.0.1"

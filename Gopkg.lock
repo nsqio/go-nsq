@@ -2,13 +2,15 @@
 
 
 [[projects]]
+  digest = "1:6a6322a15aa8e99bd156fbba0aae4e5d67b4bb05251d860b348a45dfdcba9cce"
   name = "github.com/golang/snappy"
   packages = ["."]
-  revision = "d9eb7a3d35ec988b8585d4a0068e462c27d28380"
+  pruneopts = ""
+  revision = "v0.0.1"
 
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "eeb528388b932e0b4fd05a24243101a7d731edd504d0c247c620f9d949a29318"
+  input-imports = ["github.com/golang/snappy"]
   solver-name = "gps-cdcl"
   solver-version = 1
