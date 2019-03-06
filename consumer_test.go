@@ -168,7 +168,7 @@ func consumerTest(t *testing.T, cb func(c *Config)) {
 	}
 	topicName = topicName + strconv.Itoa(int(time.Now().Unix()))
 	q, _ := NewConsumer(topicName, "ch", config)
-	q.SetLogger(log.New(os.Stderr, "", log.Flags()), LogLevelDebug)
+	q.SetLogger(newTestLogger(t), LogLevelDebug)
 
 	h := &MyTestHandler{
 		t: t,
