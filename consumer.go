@@ -771,11 +771,10 @@ func (r *Consumer) startStopContinueBackoff(conn *Conn, signal backoffSignal) {
 	// max backoff/normal rate (by ensuring that we dont continually incr/decr
 	// the counter during a backoff period)
 	r.backoffMtx.Lock()
+	defer r.backoffMtx.Unlock()
 	if r.inBackoffTimeout() {
-		r.backoffMtx.Unlock()
 		return
 	}
-	defer r.backoffMtx.Unlock()
 
 	// update backoff state
 	backoffUpdated := false
