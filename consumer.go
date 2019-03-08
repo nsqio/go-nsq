@@ -111,11 +111,11 @@ type Consumer struct {
 
 	needRDYRedistributed int32
 
-	backoffMtx sync.RWMutex
+	backoffMtx sync.Mutex
 
 	incomingMessages chan *Message
 
-	rdyRetryMtx    sync.RWMutex
+	rdyRetryMtx    sync.Mutex
 	rdyRetryTimers map[string]*time.Timer
 
 	pendingConnections map[string]*Conn
