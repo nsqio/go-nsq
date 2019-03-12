@@ -641,6 +641,24 @@ func (r *Consumer) DisconnectFromNSQLookupd(addr string) error {
 	return nil
 }
 
+// GetNSQDAddresses returns a copy of the current list of nsqd addresses this consumer knows about.
+func (r *Consumer) GetNSQDAddresses() []string {
+	r.mtx.RLock()
+	defer r.mtx.RUnlock()
+	addrs := make([]string, len(r.nsqdTCPAddrs))
+	copy(addrs, r.nsqdTCPAddrs)
+	return addrs
+}
+
+// GetNSQLookupdAddresses returns a copy of the current list of lookupd addresses this consumer knows about.
+func (r *Consumer) GetNSQLookupdAddresses() []string {
+	r.mtx.RLock()
+	defer r.mtx.RUnlock()
+	addrs := make([]string, len(r.lookupdHTTPAddrs))
+	copy(addrs, r.lookupdHTTPAddrs)
+	return addrs
+}
+
 func (r *Consumer) onConnMessage(c *Conn, msg *Message) {
 	atomic.AddInt64(&r.totalRdyCount, -1)
 	atomic.AddUint64(&r.messagesReceived, 1)

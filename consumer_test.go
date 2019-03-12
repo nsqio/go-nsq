@@ -192,6 +192,11 @@ func consumerTest(t *testing.T, cb func(c *Config)) {
 		t.Fatal("stats report 0 connections (should be > 0)")
 	}
 
+	addresses := q.GetNSQDAddresses()
+	if len(addresses) == 0 {
+		t.Fatal("found 0 connections (should be > 0)")
+	}
+
 	err = q.ConnectToNSQD(addr)
 	if err == nil {
 		t.Fatal("should not be able to connect to the same NSQ twice")
