@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"strconv"
 	"testing"
@@ -38,6 +37,7 @@ type instruction struct {
 }
 
 type mockNSQD struct {
+	t           *testing.T
 	script      []instruction
 	got         [][]byte
 	tcpAddr     *net.TCPAddr
@@ -45,15 +45,16 @@ type mockNSQD struct {
 	exitChan    chan int
 }
 
-func newMockNSQD(script []instruction, addr string) *mockNSQD {
+func newMockNSQD(t *testing.T, script []instruction, addr string) *mockNSQD {
 	n := &mockNSQD{
+		t:        t,
 		script:   script,
 		exitChan: make(chan int),
 	}
 
 	tcpListener, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Fatalf("FATAL: listen (%s) failed - %s", n.tcpAddr.String(), err)
+		n.t.Fatalf("FATAL: listen (%s) failed - %s", n.tcpAddr, err)
 	}
 	n.tcpListener = tcpListener
 	n.tcpAddr = tcpListener.Addr().(*net.TCPAddr)
@@ -64,7 +65,7 @@ func newMockNSQD(script []instruction, addr string) *mockNSQD {
 }
 
 func (n *mockNSQD) listen() {
-	log.Printf("TCP: listening on %s", n.tcpListener.Addr().String())
+	n.t.Logf("TCP: listening on %s", n.tcpListener.Addr())
 
 	for {
 		conn, err := n.tcpListener.Accept()
@@ -74,19 +75,19 @@ func (n *mockNSQD) listen() {
 		go n.handle(conn)
 	}
 
-	log.Printf("TCP: closing %s", n.tcpListener.Addr().String())
+	n.t.Logf("TCP: closing %s", n.tcpListener.Addr())
 	close(n.exitChan)
 }
 
 func (n *mockNSQD) handle(conn net.Conn) {
 	var idx int
 
-	log.Printf("TCP: new client(%s)", conn.RemoteAddr())
+	n.t.Logf("TCP: new client(%s)", conn.RemoteAddr())
 
 	buf := make([]byte, 4)
 	_, err := io.ReadFull(conn, buf)
 	if err != nil {
-		log.Fatalf("ERROR: failed to read protocol version - %s", err)
+		n.t.Fatalf("ERROR: failed to read protocol version - %s", err)
 	}
 
 	readChan := make(chan []byte)
@@ -111,7 +112,7 @@ func (n *mockNSQD) handle(conn net.Conn) {
 	for idx < len(n.script) {
 		select {
 		case line := <-readChan:
-			log.Printf("mock: %s", line)
+			n.t.Logf("mock: %s", line)
 			n.got = append(n.got, line)
 			params := bytes.Split(line, []byte(" "))
 			switch {
@@ -119,17 +120,17 @@ func (n *mockNSQD) handle(conn net.Conn) {
 				l := make([]byte, 4)
 				_, err := io.ReadFull(rdr, l)
 				if err != nil {
-					log.Printf(err.Error())
+					n.t.Log(err)
 					goto exit
 				}
 				size := int32(binary.BigEndian.Uint32(l))
 				b := make([]byte, size)
 				_, err = io.ReadFull(rdr, b)
 				if err != nil {
-					log.Printf(err.Error())
+					n.t.Log(err)
 					goto exit
 				}
-				log.Printf("%s", b)
+				n.t.Logf("%s", b)
 			case bytes.Equal(params[0], []byte("RDY")):
 				rdy, _ := strconv.Atoi(string(params[1]))
 				rdyCount = rdy
@@ -144,7 +145,7 @@ func (n *mockNSQD) handle(conn net.Conn) {
 			}
 			if inst.frameType == FrameTypeMessage {
 				if rdyCount == 0 {
-					log.Printf("!!! RDY == 0")
+					n.t.Log("!!! RDY == 0")
 					scriptTime = time.After(n.script[idx+1].delay)
 					continue
 				}
@@ -152,7 +153,7 @@ func (n *mockNSQD) handle(conn net.Conn) {
 			}
 			_, err := conn.Write(framedResponse(inst.frameType, inst.body))
 			if err != nil {
-				log.Printf(err.Error())
+				n.t.Log(err)
 				goto exit
 			}
 			scriptTime = time.After(n.script[idx+1].delay)
@@ -220,9 +221,9 @@ func TestConsumerBackoff(t *testing.T) {
 	msgBad := NewMessage(msgIDBad, []byte("bad"))
 
 	script := []instruction{
-		// SUB
-		instruction{0, FrameTypeResponse, []byte("OK")},
 		// IDENTIFY
+		instruction{0, FrameTypeResponse, []byte("OK")},
+		// SUB
 		instruction{0, FrameTypeResponse, []byte("OK")},
 		instruction{20 * time.Millisecond, FrameTypeMessage, frameMessage(msgGood)},
 		instruction{20 * time.Millisecond, FrameTypeMessage, frameMessage(msgGood)},
@@ -236,7 +237,7 @@ func TestConsumerBackoff(t *testing.T) {
 	}
 
 	addr, _ := net.ResolveTCPAddr("tcp", "127.0.0.1:0")
-	n := newMockNSQD(script, addr.String())
+	n := newMockNSQD(t, script, addr.String())
 
 	topicName := "test_consumer_commands" + strconv.Itoa(int(time.Now().Unix()))
 	config := NewConfig()
@@ -253,7 +254,7 @@ func TestConsumerBackoff(t *testing.T) {
 	<-n.exitChan
 
 	for i, r := range n.got {
-		log.Printf("%d: %s", i, r)
+		t.Logf("%d: %s", i, r)
 	}
 
 	expected := []string{
@@ -263,7 +264,6 @@ func TestConsumerBackoff(t *testing.T) {
 		fmt.Sprintf("FIN %s", msgIDGood),
 		fmt.Sprintf("FIN %s", msgIDGood),
 		fmt.Sprintf("FIN %s", msgIDGood),
-		"RDY 5",
 		"RDY 0",
 		fmt.Sprintf("REQ %s 0", msgIDBad),
 		"RDY 1",
@@ -296,9 +296,9 @@ func TestConsumerRequeueNoBackoff(t *testing.T) {
 	msgRequeueNoBackoff := NewMessage(msgIDRequeueNoBackoff, []byte("requeue_no_backoff_1"))
 
 	script := []instruction{
-		// SUB
-		instruction{0, FrameTypeResponse, []byte("OK")},
 		// IDENTIFY
+		instruction{0, FrameTypeResponse, []byte("OK")},
+		// SUB
 		instruction{0, FrameTypeResponse, []byte("OK")},
 		instruction{20 * time.Millisecond, FrameTypeMessage, frameMessage(msgRequeue)},
 		instruction{20 * time.Millisecond, FrameTypeMessage, frameMessage(msgRequeueNoBackoff)},
@@ -308,7 +308,7 @@ func TestConsumerRequeueNoBackoff(t *testing.T) {
 	}
 
 	addr, _ := net.ResolveTCPAddr("tcp", "127.0.0.1:0")
-	n := newMockNSQD(script, addr.String())
+	n := newMockNSQD(t, script, addr.String())
 
 	topicName := "test_requeue" + strconv.Itoa(int(time.Now().Unix()))
 	config := NewConfig()
@@ -324,19 +324,18 @@ func TestConsumerRequeueNoBackoff(t *testing.T) {
 
 	select {
 	case <-n.exitChan:
-		log.Printf("clean exit")
+		t.Log("clean exit")
 	case <-time.After(500 * time.Millisecond):
-		log.Printf("timeout")
+		t.Log("timeout")
 	}
 
 	for i, r := range n.got {
-		log.Printf("%d: %s", i, r)
+		t.Logf("%d: %s", i, r)
 	}
 
 	expected := []string{
 		"IDENTIFY",
 		"SUB " + topicName + " ch",
-		"RDY 1",
 		"RDY 1",
 		"RDY 0",
 		fmt.Sprintf("REQ %s 0", msgIDRequeue),
@@ -365,9 +364,9 @@ func TestConsumerBackoffDisconnect(t *testing.T) {
 	msgRequeue := NewMessage(msgIDRequeue, []byte("requeue"))
 
 	script := []instruction{
-		// SUB
-		instruction{0, FrameTypeResponse, []byte("OK")},
 		// IDENTIFY
+		instruction{0, FrameTypeResponse, []byte("OK")},
+		// SUB
 		instruction{0, FrameTypeResponse, []byte("OK")},
 		instruction{20 * time.Millisecond, FrameTypeMessage, frameMessage(msgGood)},
 		instruction{20 * time.Millisecond, FrameTypeMessage, frameMessage(msgRequeue)},
@@ -378,7 +377,7 @@ func TestConsumerBackoffDisconnect(t *testing.T) {
 	}
 
 	addr, _ := net.ResolveTCPAddr("tcp", "127.0.0.1:0")
-	n := newMockNSQD(script, addr.String())
+	n := newMockNSQD(t, script, addr.String())
 
 	topicName := "test_requeue" + strconv.Itoa(int(time.Now().Unix()))
 	config := NewConfig()
@@ -396,13 +395,13 @@ func TestConsumerBackoffDisconnect(t *testing.T) {
 
 	select {
 	case <-n.exitChan:
-		log.Printf("clean exit")
+		t.Log("clean exit")
 	case <-time.After(500 * time.Millisecond):
-		log.Printf("timeout")
+		t.Log("timeout")
 	}
 
 	for i, r := range n.got {
-		log.Printf("%d: %s", i, r)
+		t.Logf("%d: %s", i, r)
 	}
 
 	expected := []string{
@@ -430,9 +429,9 @@ func TestConsumerBackoffDisconnect(t *testing.T) {
 	}
 
 	script = []instruction{
-		// SUB
-		instruction{0, FrameTypeResponse, []byte("OK")},
 		// IDENTIFY
+		instruction{0, FrameTypeResponse, []byte("OK")},
+		// SUB
 		instruction{0, FrameTypeResponse, []byte("OK")},
 		instruction{20 * time.Millisecond, FrameTypeMessage, frameMessage(msgGood)},
 		instruction{20 * time.Millisecond, FrameTypeMessage, frameMessage(msgGood)},
@@ -440,17 +439,17 @@ func TestConsumerBackoffDisconnect(t *testing.T) {
 		instruction{100 * time.Millisecond, -1, []byte("exit")},
 	}
 
-	n = newMockNSQD(script, n.tcpAddr.String())
+	n = newMockNSQD(t, script, n.tcpAddr.String())
 
 	select {
 	case <-n.exitChan:
-		log.Printf("clean exit")
+		t.Log("clean exit")
 	case <-time.After(500 * time.Millisecond):
-		log.Printf("timeout")
+		t.Log("timeout")
 	}
 
 	for i, r := range n.got {
-		log.Printf("%d: %s", i, r)
+		t.Logf("%d: %s", i, r)
 	}
 
 	expected = []string{
@@ -460,6 +459,76 @@ func TestConsumerBackoffDisconnect(t *testing.T) {
 		"RDY 5",
 		fmt.Sprintf("FIN %s", msgIDGood),
 		fmt.Sprintf("FIN %s", msgIDGood),
+	}
+	if len(n.got) != len(expected) {
+		t.Fatalf("we got %d commands != %d expected", len(n.got), len(expected))
+	}
+	for i, r := range n.got {
+		if string(r) != expected[i] {
+			t.Fatalf("cmd %d bad %s != %s", i, r, expected[i])
+		}
+	}
+}
+
+func TestConsumerPause(t *testing.T) {
+	msgIDGood := MessageID{'1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'a', 's', 'd', 'f', 'g', 'h'}
+
+	msgGood := NewMessage(msgIDGood, []byte("good"))
+
+	script := []instruction{
+		// IDENTIFY
+		instruction{0, FrameTypeResponse, []byte("OK")},
+		// SUB
+		instruction{0, FrameTypeResponse, []byte("OK")},
+		instruction{20 * time.Millisecond, FrameTypeMessage, frameMessage(msgGood)},
+		// needed to exit test
+		instruction{200 * time.Millisecond, -1, []byte("exit")},
+	}
+
+	addr, _ := net.ResolveTCPAddr("tcp", "127.0.0.1:0")
+	n := newMockNSQD(t, script, addr.String())
+
+	topicName := "test_pause" + strconv.Itoa(int(time.Now().Unix()))
+	config := NewConfig()
+	config.MaxInFlight = 5
+	q, _ := NewConsumer(topicName, "ch", config)
+	q.SetLogger(newTestLogger(t), LogLevelDebug)
+	q.AddHandler(&testHandler{})
+	err := q.ConnectToNSQD(n.tcpAddr.String())
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+
+	timeoutCh := time.After(500 * time.Millisecond)
+	pauseCh := time.After(50 * time.Millisecond)
+	unpauseCh := time.After(75 * time.Millisecond)
+	for {
+		select {
+		case <-n.exitChan:
+			t.Log("clean exit")
+			goto done
+		case <-timeoutCh:
+			t.Log("timeout")
+			goto done
+		case <-pauseCh:
+			q.ChangeMaxInFlight(0)
+		case <-unpauseCh:
+			q.ChangeMaxInFlight(config.MaxInFlight)
+		}
+	}
+done:
+
+	for i, r := range n.got {
+		t.Logf("%d: %s", i, r)
+	}
+
+	expected := []string{
+		"IDENTIFY",
+		"SUB " + topicName + " ch",
+		"RDY 5",
+		fmt.Sprintf("FIN %s", msgIDGood),
+		"RDY 0",
+		"RDY 5",
 	}
 	if len(n.got) != len(expected) {
 		t.Fatalf("we got %d commands != %d expected", len(n.got), len(expected))

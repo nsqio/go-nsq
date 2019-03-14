@@ -10,7 +10,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -116,11 +115,6 @@ func TestConsumerTLSSnappy(t *testing.T) {
 }
 
 func TestConsumerTLSClientCert(t *testing.T) {
-	envDl := os.Getenv("NSQ_DOWNLOAD")
-	if strings.HasPrefix(envDl, "nsq-0.2.24") || strings.HasPrefix(envDl, "nsq-0.2.27") {
-		t.Log("skipping due to older nsqd")
-		return
-	}
 	cert, _ := tls.LoadX509KeyPair("./test/client.pem", "./test/client.key")
 	consumerTest(t, func(c *Config) {
 		c.TlsV1 = true
@@ -132,11 +126,6 @@ func TestConsumerTLSClientCert(t *testing.T) {
 }
 
 func TestConsumerTLSClientCertViaSet(t *testing.T) {
-	envDl := os.Getenv("NSQ_DOWNLOAD")
-	if strings.HasPrefix(envDl, "nsq-0.2.24") || strings.HasPrefix(envDl, "nsq-0.2.27") {
-		t.Log("skipping due to older nsqd")
-		return
-	}
 	consumerTest(t, func(c *Config) {
 		c.Set("tls_v1", true)
 		c.Set("tls_cert", "./test/client.pem")
@@ -168,7 +157,7 @@ func consumerTest(t *testing.T, cb func(c *Config)) {
 	}
 	topicName = topicName + strconv.Itoa(int(time.Now().Unix()))
 	q, _ := NewConsumer(topicName, "ch", config)
-	q.SetLogger(log.New(os.Stderr, "", log.Flags()), LogLevelDebug)
+	q.SetLogger(newTestLogger(t), LogLevelDebug)
 
 	h := &MyTestHandler{
 		t: t,
