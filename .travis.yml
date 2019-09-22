@@ -1,8 +1,8 @@
 language: go
 go:
-  - 1.10.x
   - 1.11.x
   - 1.12.x
+  - 1.13.x
 env:
   - NSQ_DOWNLOAD=nsq-0.3.8.linux-amd64.go1.6.2 GOARCH=amd64
   - NSQ_DOWNLOAD=nsq-0.3.8.linux-amd64.go1.6.2 GOARCH=386
