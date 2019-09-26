@@ -3,6 +3,7 @@ package nsq
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"regexp"
 )
@@ -56,6 +57,9 @@ func ReadResponse(r io.Reader) ([]byte, error) {
 		return nil, err
 	}
 
+	if msgSize < 0 {
+		return nil, fmt.Errorf("response msg size is negative: %v", msgSize)
+	}
 	// message binary data
 	buf := make([]byte, msgSize)
 	_, err = io.ReadFull(r, buf)
