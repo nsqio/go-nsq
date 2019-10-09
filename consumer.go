@@ -223,6 +223,13 @@ func (r *Consumer) SetLogger(l logger, lvl LogLevel) {
 	r.logLvl = lvl
 }
 
+func (r *Consumer) SetLoggerLevel(lvl LogLevel) {
+	r.logGuard.Lock()
+	defer r.logGuard.Unlock()
+
+	r.logLvl = lvl
+}
+
 func (r *Consumer) getLogger() (logger, LogLevel) {
 	r.logGuard.RLock()
 	defer r.logGuard.RUnlock()
