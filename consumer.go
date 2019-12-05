@@ -958,6 +958,65 @@ func (r *Consumer) sendRDY(c *Conn, count int64) error {
 	return nil
 }
 
+func (r *Consumer) redistributeUnusedRDY() {
+	// RDYTrading
+	if !r.config.RDYTrading {
+		return
+	}
+
+	// alright so we arrive here if there's no normal RDY redistribution (low maxinflight) going on
+	// what we now want to accomplish is move RDY away from idle conns / nsqd sources
+	// that way we can actually make use of maxinflight if only one source is producing at the moment
+	conns := r.conns()
+	if len(conns) < 2 {
+		return
+	}
+
+	r.log(LogLevelDebug, "looking for RDY trade possibilities...")
+
+	idleConns := make([]*Conn, 0, len(conns))
+	busyConns := make([]*Conn, 0, len(conns))
+
+	for _, c := range conns {
+		lastMsgDuration := time.Now().Sub(c.LastMessageTime())
+		lastRdyDuration := time.Now().Sub(c.LastRdyTime())
+
+		// if we did not get a message since last time we set RDY
+		if lastRdyDuration < lastMsgDuration {
+			idleConns = append(idleConns, c)
+		} else {
+			busyConns = append(busyConns, c)
+		}
+	}
+
+	// we need to have at least one in both sets so we can trade RDY
+	if len(idleConns) == 0 || len(busyConns) == 0 {
+		r.log(LogLevelDebug, " - no RDY trade possible")
+
+		// we might have done trading before but then other nsqds became active
+		// so we should equalize again
+		for _, c := range conns {
+			if c.RDY() != r.perConnMaxInFlight() {
+				r.maybeUpdateRDY(c)
+			}
+		}
+		return
+	}
+
+	for len(idleConns) > 0 && len(busyConns) > 0 {
+		// trade RDY from idleConn to busyConn
+		r.rngMtx.Lock()
+		i := r.rng.Int() % len(idleConns)
+		r.rngMtx.Unlock()
+		c := idleConns[i]
+		idleConns = append(idleConns[:i], idleConns[i+1:]...)
+		moveRDY := c.RDY() / 2
+		r.log(LogLevelDebug, " - moving %d RDY from %s to %s", moveRDY, c.String(), busyConns[0].String())
+		r.updateRDY(c, moveRDY)
+		r.updateRDY(busyConns[0], busyConns[0].RDY() + moveRDY)
+	}
+}
+
 func (r *Consumer) redistributeRDY() {
 	if r.inBackoffTimeout() {
 		return
@@ -983,6 +1042,7 @@ func (r *Consumer) redistributeRDY() {
 	}
 
 	if !atomic.CompareAndSwapInt32(&r.needRDYRedistributed, 1, 0) {
+		r.redistributeUnusedRDY()
 		return
 	}
 
