@@ -93,6 +93,8 @@ type Consumer struct {
 	backoffCounter   int32
 	maxInFlight      int32
 
+	lastRDYTradeTimestamp int64
+
 	mtx sync.RWMutex
 
 	logger   logger
@@ -958,9 +960,13 @@ func (r *Consumer) sendRDY(c *Conn, count int64) error {
 	return nil
 }
 
+func (r *Consumer) LastRDYTradeTime() time.Time {
+	return time.Unix(0, atomic.LoadInt64(&r.lastRDYTradeTimestamp))
+}
+
 func (r *Consumer) redistributeUnusedRDY() {
 	// RDYTrading
-	if !r.config.RDYTrading {
+	if !r.config.RDYTrading || time.Now().Sub(r.LastRDYTradeTime()) < time.Second * 60  {
 		return
 	}
 
@@ -972,7 +978,14 @@ func (r *Consumer) redistributeUnusedRDY() {
 		return
 	}
 
-	r.log(LogLevelDebug, "looking for RDY trade possibilities...")
+	// this should already be ensured by the location we're called from, but check again anyways
+	inBackoff := r.inBackoff()
+	inBackoffTimeout := r.inBackoffTimeout()
+	if inBackoff || inBackoffTimeout {
+		return
+	}
+
+	r.log(LogLevelDebug, "begin RDY trading...")
 
 	idleConns := make([]*Conn, 0, len(conns))
 	busyConns := make([]*Conn, 0, len(conns))
@@ -991,11 +1004,18 @@ func (r *Consumer) redistributeUnusedRDY() {
 
 	// we need to have at least one in both sets so we can trade RDY
 	if len(idleConns) == 0 || len(busyConns) == 0 {
-		r.log(LogLevelDebug, " - no RDY trade possible")
+		r.log(LogLevelDebug, " - no RDY trading possible (empty set)")
 
 		// we might have done trading before but then other nsqds became active
 		// so we should equalize again
-		for _, c := range conns {
+		for _, c := range busyConns {
+			if c.RDY() != r.perConnMaxInFlight() {
+				r.maybeUpdateRDY(c)
+			}
+		}
+		// we do busy conns first to get back any potential traded RDY
+		// after that it should work to reset the idle ones
+		for _, c := range idleConns {
 			if c.RDY() != r.perConnMaxInFlight() {
 				r.maybeUpdateRDY(c)
 			}
@@ -1003,17 +1023,26 @@ func (r *Consumer) redistributeUnusedRDY() {
 		return
 	}
 
-	for len(idleConns) > 0 && len(busyConns) > 0 {
-		// trade RDY from idleConn to busyConn
-		r.rngMtx.Lock()
-		i := r.rng.Int() % len(idleConns)
-		r.rngMtx.Unlock()
-		c := idleConns[i]
-		idleConns = append(idleConns[:i], idleConns[i+1:]...)
-		moveRDY := c.RDY() / 2
-		r.log(LogLevelDebug, " - moving %d RDY from %s to %s", moveRDY, c.String(), busyConns[0].String())
-		r.updateRDY(c, moveRDY)
-		r.updateRDY(busyConns[0], busyConns[0].RDY() + moveRDY)
+	// begin trading and remember we did
+	atomic.StoreInt64(&r.lastRDYTradeTimestamp, time.Now().UnixNano())
+
+	// we will reduce idle conns to RDY 1 and distribute
+	reducedRDY := int64(0)
+
+	for _, c := range idleConns {
+		if c.RDY() > 1 {
+			r.log(LogLevelDebug, " - removing %d RDY from %s", c.RDY() - 1, c.String())
+			reducedRDY += c.RDY() - 1
+			r.updateRDY(c, 1)
+		}
+	}
+
+	// all busy conns get an equal RDY amount, in theory could be based on throughput but
+	//  that's even harder to get right
+	busyConnRDY := reducedRDY / int64(len(busyConns))
+	for _, c := range busyConns {
+		r.log(LogLevelDebug, " - adding %d RDY to %s", busyConnRDY, c.String())
+		r.updateRDY(c, c.RDY() + busyConnRDY)
 	}
 }
 
