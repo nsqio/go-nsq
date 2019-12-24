@@ -384,18 +384,19 @@ func (c *Conn) identify() (*IdentifyResponse, error) {
 }
 
 func (c *Conn) upgradeTLS(tlsConf *tls.Config) error {
-	// create a local copy of the config to set ServerName for this connection
-	var conf tls.Config
-	if tlsConf != nil {
-		conf = *tlsConf
-	}
 	host, _, err := net.SplitHostPort(c.addr)
 	if err != nil {
 		return err
 	}
+
+	// create a local copy of the config to set ServerName for this connection
+	conf := &tls.Config{}
+	if tlsConf != nil {
+		conf = tlsConf.Clone()
+	}
 	conf.ServerName = host
 
-	c.tlsConn = tls.Client(c.conn, &conf)
+	c.tlsConn = tls.Client(c.conn, conf)
 	err = c.tlsConn.Handshake()
 	if err != nil {
 		return err
