@@ -12,6 +12,8 @@ import (
 type producerConn interface {
 	String() string
 	SetLogger(logger, LogLevel, string)
+	SetLoggerLevel(LogLevel)
+	SetLoggerForLevel(logger, LogLevel, string)
 	Connect() (*IdentifyResponse, error)
 	Close() error
 	WriteCommand(*Command) error
@@ -28,7 +30,7 @@ type Producer struct {
 	conn   producerConn
 	config Config
 
-	logger   logger
+	logger   []logger
 	logLvl   LogLevel
 	logGuard sync.RWMutex
 
@@ -80,13 +82,19 @@ func NewProducer(addr string, config *Config) (*Producer, error) {
 		addr:   addr,
 		config: *config,
 
-		logger: log.New(os.Stderr, "", log.Flags()),
+		logger: make([]logger, int(LogLevelMax+1)),
 		logLvl: LogLevelInfo,
 
 		transactionChan: make(chan *ProducerTransaction),
 		exitChan:        make(chan int),
 		responseChan:    make(chan []byte),
 		errorChan:       make(chan []byte),
+	}
+
+	// Set default logger for all log levels
+	l := log.New(os.Stderr, "", log.Flags())
+	for index, _ := range p.logger {
+		p.logger[index] = l
 	}
 	return p, nil
 }
@@ -119,15 +127,40 @@ func (w *Producer) SetLogger(l logger, lvl LogLevel) {
 	w.logGuard.Lock()
 	defer w.logGuard.Unlock()
 
-	w.logger = l
+	for level := range w.logger {
+		w.logger[level] = l
+	}
 	w.logLvl = lvl
 }
 
-func (w *Producer) getLogger() (logger, LogLevel) {
+// SetLoggerForLevel assigns the same logger for specified `level`.
+func (w *Producer) SetLoggerForLevel(l logger, lvl LogLevel) {
+	w.logGuard.Lock()
+	defer w.logGuard.Unlock()
+
+	w.logger[lvl] = l
+}
+
+// SetLoggerLevel sets the package logging level.
+func (w *Producer) SetLoggerLevel(lvl LogLevel) {
+	w.logGuard.Lock()
+	defer w.logGuard.Unlock()
+
+	w.logLvl = lvl
+}
+
+func (w *Producer) getLogger(lvl LogLevel) (logger, LogLevel) {
 	w.logGuard.RLock()
 	defer w.logGuard.RUnlock()
 
-	return w.logger, w.logLvl
+	return w.logger[lvl], w.logLvl
+}
+
+func (w *Producer) getLogLevel() LogLevel {
+	w.logGuard.RLock()
+	defer w.logGuard.RUnlock()
+
+	return w.logLvl
 }
 
 // String returns the address of the Producer
@@ -273,10 +306,11 @@ func (w *Producer) connect() error {
 
 	w.log(LogLevelInfo, "(%s) connecting to nsqd", w.addr)
 
-	logger, logLvl := w.getLogger()
-
 	w.conn = NewConn(w.addr, &w.config, &producerConnDelegate{w})
-	w.conn.SetLogger(logger, logLvl, fmt.Sprintf("%3d (%%s)", w.id))
+	w.conn.SetLoggerLevel(w.getLogLevel())
+	for index := range w.logger {
+		w.conn.SetLoggerForLevel(w.logger[index], LogLevel(index), fmt.Sprintf("%3d (%%s)", w.id))
+	}
 
 	_, err := w.conn.Connect()
 	if err != nil {
@@ -369,7 +403,7 @@ func (w *Producer) transactionCleanup() {
 }
 
 func (w *Producer) log(lvl LogLevel, line string, args ...interface{}) {
-	logger, logLvl := w.getLogger()
+	logger, logLvl := w.getLogger(lvl)
 
 	if logger == nil {
 		return

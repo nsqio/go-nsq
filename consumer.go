@@ -95,7 +95,7 @@ type Consumer struct {
 
 	mtx sync.RWMutex
 
-	logger   logger
+	logger   []logger
 	logLvl   LogLevel
 	logGuard sync.RWMutex
 
@@ -166,7 +166,7 @@ func NewConsumer(topic string, channel string, config *Config) (*Consumer, error
 		channel: channel,
 		config:  *config,
 
-		logger:      log.New(os.Stderr, "", log.Flags()),
+		logger:      make([]logger, LogLevelMax+1),
 		logLvl:      LogLevelInfo,
 		maxInFlight: int32(config.MaxInFlight),
 
@@ -183,6 +183,13 @@ func NewConsumer(topic string, channel string, config *Config) (*Consumer, error
 		StopChan: make(chan int),
 		exitChan: make(chan int),
 	}
+
+	// Set default logger for all log levels
+	l := log.New(os.Stderr, "", log.Flags())
+	for index := range r.logger {
+		r.logger[index] = l
+	}
+
 	r.wg.Add(1)
 	go r.rdyLoop()
 	return r, nil
@@ -219,10 +226,21 @@ func (r *Consumer) SetLogger(l logger, lvl LogLevel) {
 	r.logGuard.Lock()
 	defer r.logGuard.Unlock()
 
-	r.logger = l
+	for level := range r.logger {
+		r.logger[level] = l
+	}
 	r.logLvl = lvl
 }
 
+// SetLoggerForLevel assigns the same logger for specified `level`.
+func (r *Consumer) SetLoggerForLevel(l logger, lvl LogLevel) {
+	r.logGuard.Lock()
+	defer r.logGuard.Unlock()
+
+	r.logger[lvl] = l
+}
+
+// SetLoggerLevel sets the package logging level.
 func (r *Consumer) SetLoggerLevel(lvl LogLevel) {
 	r.logGuard.Lock()
 	defer r.logGuard.Unlock()
@@ -230,11 +248,18 @@ func (r *Consumer) SetLoggerLevel(lvl LogLevel) {
 	r.logLvl = lvl
 }
 
-func (r *Consumer) getLogger() (logger, LogLevel) {
+func (r *Consumer) getLogger(lvl LogLevel) (logger, LogLevel) {
 	r.logGuard.RLock()
 	defer r.logGuard.RUnlock()
 
-	return r.logger, r.logLvl
+	return r.logger[lvl], r.logLvl
+}
+
+func (r *Consumer) getLogLevel() LogLevel {
+	r.logGuard.RLock()
+	defer r.logGuard.RUnlock()
+
+	return r.logLvl
 }
 
 // SetBehaviorDelegate takes a type implementing one or more
@@ -530,12 +555,12 @@ func (r *Consumer) ConnectToNSQD(addr string) error {
 
 	atomic.StoreInt32(&r.connectedFlag, 1)
 
-	logger, logLvl := r.getLogger()
-
 	conn := NewConn(addr, &r.config, &consumerConnDelegate{r})
-	conn.SetLogger(logger, logLvl,
-		fmt.Sprintf("%3d [%s/%s] (%%s)", r.id, r.topic, r.channel))
-
+	conn.SetLoggerLevel(r.getLogLevel())
+	for index := range r.logger {
+		conn.SetLoggerForLevel(r.logger[index], LogLevel(index),
+			fmt.Sprintf("%3d [%s/%s] (%%s)", r.id, r.topic, r.channel))
+	}
 	r.mtx.Lock()
 	_, pendingOk := r.pendingConnections[addr]
 	_, ok := r.connections[addr]
@@ -1156,7 +1181,7 @@ func (r *Consumer) exit() {
 }
 
 func (r *Consumer) log(lvl LogLevel, line string, args ...interface{}) {
-	logger, logLvl := r.getLogger()
+	logger, logLvl := r.getLogger(lvl)
 
 	if logger == nil {
 		return

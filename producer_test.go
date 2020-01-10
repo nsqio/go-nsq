@@ -305,6 +305,10 @@ func (m *mockProducerConn) String() string {
 
 func (m *mockProducerConn) SetLogger(logger logger, level LogLevel, prefix string) {}
 
+func (m *mockProducerConn) SetLoggerLevel(lvl LogLevel) {}
+
+func (m *mockProducerConn) SetLoggerForLevel(logger logger, level LogLevel, format string) {}
+
 func (m *mockProducerConn) Connect() (*IdentifyResponse, error) {
 	return &IdentifyResponse{}, nil
 }
