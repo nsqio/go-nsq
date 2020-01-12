@@ -557,9 +557,9 @@ func (r *Consumer) ConnectToNSQD(addr string) error {
 
 	conn := NewConn(addr, &r.config, &consumerConnDelegate{r})
 	conn.SetLoggerLevel(r.getLogLevel())
+	format := fmt.Sprintf("%3d [%s/%s] (%%s)", r.id, r.topic, r.channel)
 	for index := range r.logger {
-		conn.SetLoggerForLevel(r.logger[index], LogLevel(index),
-			fmt.Sprintf("%3d [%s/%s] (%%s)", r.id, r.topic, r.channel))
+		conn.SetLoggerForLevel(r.logger[index], LogLevel(index), format)
 	}
 	r.mtx.Lock()
 	_, pendingOk := r.pendingConnections[addr]

@@ -125,12 +125,12 @@ func (c *Conn) SetLogger(l logger, lvl LogLevel, format string) {
 	c.logGuard.Lock()
 	defer c.logGuard.Unlock()
 
+	if format == "" {
+		format = "(%s)"
+	}
 	for level := range c.logger {
 		c.logger[level] = l
 		c.logFmt[level] = format
-		if c.logFmt[level] == "" {
-			c.logFmt[level] = "(%s)"
-		}
 	}
 	c.logLvl = lvl
 }
@@ -139,6 +139,9 @@ func (c *Conn) SetLoggerForLevel(l logger, lvl LogLevel, format string) {
 	c.logGuard.Lock()
 	defer c.logGuard.Unlock()
 
+	if format == "" {
+		format = "(%s)"
+	}
 	c.logger[lvl] = l
 	c.logFmt[lvl] = format
 }
