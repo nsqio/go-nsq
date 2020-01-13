@@ -308,8 +308,9 @@ func (w *Producer) connect() error {
 
 	w.conn = NewConn(w.addr, &w.config, &producerConnDelegate{w})
 	w.conn.SetLoggerLevel(w.getLogLevel())
+	format := fmt.Sprintf("%3d (%%s)", w.id)
 	for index := range w.logger {
-		w.conn.SetLoggerForLevel(w.logger[index], LogLevel(index), fmt.Sprintf("%3d (%%s)", w.id))
+		w.conn.SetLoggerForLevel(w.logger[index], LogLevel(index), format)
 	}
 
 	_, err := w.conn.Connect()
