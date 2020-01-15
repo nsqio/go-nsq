@@ -343,7 +343,6 @@ func TestConsumerRequeueNoBackoff(t *testing.T) {
 		"RDY 0",
 		fmt.Sprintf("REQ %s 0", msgIDRequeueNoBackoff),
 		"RDY 1",
-		"RDY 1",
 		fmt.Sprintf("FIN %s", msgIDGood),
 	}
 	if len(n.got) != len(expected) {
