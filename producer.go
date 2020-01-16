@@ -70,7 +70,6 @@ func (t *ProducerTransaction) finish() {
 // The only valid way to create a Config is via NewConfig, using a struct literal will panic.
 // After Config is passed into NewProducer the values are no longer mutable (they are copied).
 func NewProducer(addr string, config *Config) (*Producer, error) {
-	config.assertInitialized()
 	err := config.Validate()
 	if err != nil {
 		return nil, err

@@ -145,8 +145,6 @@ type Consumer struct {
 // The only valid way to create a Config is via NewConfig, using a struct literal will panic.
 // After Config is passed into NewConsumer the values are no longer mutable (they are copied).
 func NewConsumer(topic string, channel string, config *Config) (*Consumer, error) {
-	config.assertInitialized()
-
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
