@@ -981,7 +981,13 @@ func (r *Consumer) sendRDY(c *Conn, count int64) error {
 	}
 
 	atomic.AddInt64(&r.totalRdyCount, count-c.RDY())
+
+	lastRDY := c.LastRDY()
 	c.SetRDY(count)
+	if count == lastRDY {
+		return nil
+	}
+
 	err := c.WriteCommand(Ready(int(count)))
 	if err != nil {
 		r.log(LogLevelError, "(%s) error sending RDY %d - %s", c.String(), count, err)
