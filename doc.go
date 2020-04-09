@@ -62,7 +62,7 @@ Producing messages can be done by creating an instance of a Producer.
 
 	// Synchronously publish a single message to the specified topic.
 	// Messages can also be sent asynchronously and/or in batches.
-	err = p.Publish(topicName, messageBody)
+	err = producer.Publish(topicName, messageBody)
 	if err != nil {
 		log.Fatal(err)
 	}
