@@ -73,8 +73,8 @@ const (
 )
 
 type Consumer interface {
-	ConnEventsHandler
-	ConnEventsMessageHandler
+	connEventsHandler
+	connEventsMessageHandler
 
 	SetLogger(l logger, lvl LogLevel)
 	SetLoggerLevel(lvl LogLevel)
@@ -190,7 +190,7 @@ func NewConsumer(topic string, channel string, config *Config) (Consumer, error)
 		channel: channel,
 		config:  *config,
 
-		loggerCarrier: NewDefaultLoggerCarrier(),
+		loggerCarrier: newDefaultLoggerCarrier(),
 		maxInFlight:   int32(config.MaxInFlight),
 
 		incomingMessages: make(chan *Message),
@@ -288,7 +288,7 @@ func (c *nsqConsumer) perConnMaxInFlight() int64 {
 func (c *nsqConsumer) IsStarved() bool {
 	for _, conn := range c.conns() {
 		threshold := int64(float64(conn.RDY()) * 0.85)
-		inFlight := atomic.LoadInt64(conn.GetInflightMessageCount())
+		inFlight := atomic.LoadInt64(conn.getInflightMessageCount())
 		if inFlight >= threshold && inFlight > 0 && !conn.IsClosing() {
 			return true
 		}

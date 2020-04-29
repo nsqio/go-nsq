@@ -45,7 +45,7 @@ type msgResponse struct {
 
 // ConnEventsHandler describes the interface that should be implemented
 // for handling events that the a Conn might fire
-type ConnEventsHandler interface {
+type connEventsHandler interface {
 	onConnResponse(c Conn, data []byte)
 	onConnError(c Conn, data []byte)
 	onConnHeartbeat(c Conn)
@@ -53,7 +53,7 @@ type ConnEventsHandler interface {
 	onConnClose(c Conn)
 }
 
-type ConnEventsMessageHandler interface {
+type connEventsMessageHandler interface {
 	onConnBackoff(c Conn)
 	onConnContinue(c Conn)
 	onConnResume(c Conn)
@@ -62,7 +62,7 @@ type ConnEventsMessageHandler interface {
 	onConnMessageRequeued(c Conn, msg *Message)
 }
 
-type MessageEventsHandler interface {
+type messageEventsHandler interface {
 	onMessageFinish(message *Message)
 	onMessageRequeue(message *Message, delay time.Duration, backoff bool)
 	onMessageTouch(message *Message)
@@ -70,25 +70,26 @@ type MessageEventsHandler interface {
 
 type Conn interface {
 	fmt.Stringer
-	MessageEventsHandler
+	messageEventsHandler
 	LoggerCarrierSetters
 
 	Connect() (*IdentifyResponse, error)
-	GetUnderlyingTCPConn() *net.TCPConn
-	Close() error
-	IsClosing() bool
-	RDY() int64
-	LastRDY() int64
-	SetRDY(rdy int64)
-	MaxRDY() int64
-	LastRdyTime() time.Time
-	LastMessageTime() time.Time
 	RemoteAddr() net.Addr
 	Read(p []byte) (int, error)
 	Write(p []byte) (int, error)
 	WriteCommand(cmd *Command) error
+	RDY() int64
+	SetRDY(rdy int64)
+	MaxRDY() int64
+	LastRDY() int64
+	LastRdyTime() time.Time
+	LastMessageTime() time.Time
 	Flush() error
-	GetInflightMessageCount() *int64
+	Close() error
+	IsClosing() bool
+
+	getUnderlyingTCPConn() *net.TCPConn
+	getInflightMessageCount() *int64
 }
 
 // Conn represents a connection to nsqd
@@ -151,7 +152,7 @@ func NewConn(addr string, config *Config, delegate ConnDelegate) Conn {
 		exitChan:        make(chan int),
 		drainReady:      make(chan int),
 
-		loggerCarrier: NewDefaultLoggerCarrier(),
+		loggerCarrier: newDefaultLoggerCarrier(),
 	}
 }
 
@@ -230,7 +231,7 @@ func (c *nsqdConn) Connect() (*IdentifyResponse, error) {
 	return resp, nil
 }
 
-func (c *nsqdConn) GetUnderlyingTCPConn() *net.TCPConn {
+func (c *nsqdConn) getUnderlyingTCPConn() *net.TCPConn {
 	return c.conn
 }
 

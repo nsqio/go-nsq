@@ -12,7 +12,7 @@ type LoggerCarrierSetters interface {
 	SetLoggerLevel(lvl LogLevel)
 }
 
-type LoggerCarrierGetters interface {
+type loggerCarrierGetters interface {
 	GetLogLevel() LogLevel
 	GetLoggers() []logger
 	GetLogFormat(lvl LogLevel) string
@@ -20,11 +20,11 @@ type LoggerCarrierGetters interface {
 }
 
 type LoggerCarrier interface {
-	LoggerCarrierGetters
+	loggerCarrierGetters
 	LoggerCarrierSetters
 }
 
-type DefaultLoggerCarrier struct {
+type defaultLoggerCarrier struct {
 	LoggerCarrier
 
 	logger []logger
@@ -34,8 +34,8 @@ type DefaultLoggerCarrier struct {
 	logGuard sync.RWMutex
 }
 
-func NewDefaultLoggerCarrier() LoggerCarrier {
-	carrier := &DefaultLoggerCarrier{
+func newDefaultLoggerCarrier() LoggerCarrier {
+	carrier := &defaultLoggerCarrier{
 		logger: make([]logger, int(LogLevelMax+1)),
 		logLvl: LogLevelInfo,
 		logFmt: make([]string, LogLevelMax+1),
@@ -56,7 +56,7 @@ func NewDefaultLoggerCarrier() LoggerCarrier {
 //
 //    Output(calldepth int, s string)
 //
-func (c *DefaultLoggerCarrier) SetLogger(l logger, lvl LogLevel, format string) {
+func (c *defaultLoggerCarrier) SetLogger(l logger, lvl LogLevel, format string) {
 	c.logGuard.Lock()
 	defer c.logGuard.Unlock()
 
@@ -70,7 +70,7 @@ func (c *DefaultLoggerCarrier) SetLogger(l logger, lvl LogLevel, format string) 
 	c.logLvl = lvl
 }
 
-func (c *DefaultLoggerCarrier) SetLoggerForLevel(l logger, lvl LogLevel, format string) {
+func (c *defaultLoggerCarrier) SetLoggerForLevel(l logger, lvl LogLevel, format string) {
 	c.logGuard.Lock()
 	defer c.logGuard.Unlock()
 
@@ -81,35 +81,35 @@ func (c *DefaultLoggerCarrier) SetLoggerForLevel(l logger, lvl LogLevel, format 
 	c.logFmt[lvl] = format
 }
 
-func (c *DefaultLoggerCarrier) SetLoggerLevel(lvl LogLevel) {
+func (c *defaultLoggerCarrier) SetLoggerLevel(lvl LogLevel) {
 	c.logGuard.Lock()
 	defer c.logGuard.Unlock()
 
 	c.logLvl = lvl
 }
 
-func (c *DefaultLoggerCarrier) GetLoggers() []logger {
+func (c *defaultLoggerCarrier) GetLoggers() []logger {
 	c.logGuard.RLock()
 	defer c.logGuard.RUnlock()
 
 	return c.logger
 }
 
-func (c *DefaultLoggerCarrier) GetLogLevel() LogLevel {
+func (c *defaultLoggerCarrier) GetLogLevel() LogLevel {
 	c.logGuard.RLock()
 	defer c.logGuard.RUnlock()
 
 	return c.logLvl
 }
 
-func (c *DefaultLoggerCarrier) GetLogFormat(lvl LogLevel) string {
+func (c *defaultLoggerCarrier) GetLogFormat(lvl LogLevel) string {
 	c.logGuard.RLock()
 	defer c.logGuard.RUnlock()
 
 	return c.logFmt[lvl]
 }
 
-func (c *DefaultLoggerCarrier) Log(
+func (c *defaultLoggerCarrier) Log(
 	lvl LogLevel,
 	msg string,
 ) {

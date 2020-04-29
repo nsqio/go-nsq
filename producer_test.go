@@ -330,12 +330,12 @@ func (m *mockProducerConn) Flush() error {
 	return nil
 }
 
-func (m *mockProducerConn) GetInflightMessageCount() *int64 {
+func (m *mockProducerConn) getInflightMessageCount() *int64 {
 	count := int64(0)
 	return &count
 }
 
-func (m *mockProducerConn) GetUnderlyingTCPConn() *net.TCPConn {
+func (m *mockProducerConn) getUnderlyingTCPConn() *net.TCPConn {
 	return nil
 }
 

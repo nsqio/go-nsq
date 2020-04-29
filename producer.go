@@ -7,9 +7,15 @@ import (
 	"time"
 )
 
-// Publisher describes the interface that should be implemented for a message
-// publisher.
-type Publisher interface {
+// Producer defines the public interface a producer should implement
+type Producer interface {
+	connEventsHandler
+	fmt.Stringer
+
+	SetLogger(l logger, lvl LogLevel)
+	SetLoggerLevel(lvl LogLevel)
+	SetLoggerForLevel(l logger, lvl LogLevel)
+
 	PublishAsync(
 		topic string,
 		body []byte,
@@ -32,17 +38,6 @@ type Publisher interface {
 		doneChan chan *ProducerTransaction,
 		args ...interface{},
 	) error
-}
-
-// Producer defines the public interface a producer should implement
-type Producer interface {
-	ConnEventsHandler
-	Publisher
-	fmt.Stringer
-
-	SetLogger(l logger, lvl LogLevel)
-	SetLoggerLevel(lvl LogLevel)
-	SetLoggerForLevel(l logger, lvl LogLevel)
 
 	Ping() error
 	Stop()
@@ -113,7 +108,7 @@ func NewProducer(addr string, config *Config) (Producer, error) {
 		addr:   addr,
 		config: *config,
 
-		loggerCarrier: NewDefaultLoggerCarrier(),
+		loggerCarrier: newDefaultLoggerCarrier(),
 
 		transactionChan: make(chan *ProducerTransaction),
 		exitChan:        make(chan int),
