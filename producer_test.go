@@ -287,13 +287,17 @@ type mockProducerConn struct {
 	delegate ConnDelegate
 	closeCh  chan struct{}
 	pubCh    chan struct{}
+
+	concurrentProducers int32
 }
 
-func newMockProducerConn(delegate ConnDelegate) producerConn {
+func newMockProducerConn(delegate ConnDelegate) Conn {
 	m := &mockProducerConn{
 		delegate: delegate,
 		closeCh:  make(chan struct{}),
 		pubCh:    make(chan struct{}, 4),
+
+		concurrentProducers: 1,
 	}
 	go m.router()
 	return m
@@ -317,6 +321,61 @@ func (m *mockProducerConn) Close() error {
 	close(m.closeCh)
 	return nil
 }
+
+func (m *mockProducerConn) IsClosing() bool {
+	return false
+}
+
+func (m *mockProducerConn) Flush() error {
+	return nil
+}
+
+func (m *mockProducerConn) GetInflightMessageCount() *int64 {
+	count := int64(0)
+	return &count
+}
+
+func (m *mockProducerConn) GetUnderlyingTCPConn() *net.TCPConn {
+	return nil
+}
+
+func (m *mockProducerConn) LastMessageTime() time.Time {
+	return time.Now()
+}
+
+func (m *mockProducerConn) LastRDY() int64 {
+	return 0
+}
+
+func (m *mockProducerConn) LastRdyTime() time.Time {
+	return time.Now()
+}
+
+func (m *mockProducerConn) RDY() int64 {
+	return 0
+}
+
+func (m *mockProducerConn) MaxRDY() int64 {
+	return 0
+}
+
+func (m *mockProducerConn) SetRDY(rdy int64) {}
+
+func (m *mockProducerConn) Read(p []byte) (int, error) {
+	return 0, nil
+}
+
+func (m *mockProducerConn) Write(p []byte) (int, error) {
+	return 0, nil
+}
+
+func (m *mockProducerConn) RemoteAddr() net.Addr {
+	return nil
+}
+
+func (m *mockProducerConn) onMessageFinish(message *Message)                                     {}
+func (m *mockProducerConn) onMessageRequeue(message *Message, delay time.Duration, backoff bool) {}
+func (m *mockProducerConn) onMessageTouch(message *Message)                                      {}
 
 func (m *mockProducerConn) WriteCommand(cmd *Command) error {
 	if bytes.Equal(cmd.Name, []byte("PUB")) {
@@ -344,9 +403,12 @@ func BenchmarkProducer(b *testing.B) {
 	config := NewConfig()
 	p, _ := NewProducer("127.0.0.1:0", config)
 
-	p.conn = newMockProducerConn(&producerConnDelegate{p})
-	atomic.StoreInt32(&p.state, StateConnected)
-	p.closeChan = make(chan int)
+	p.setConn(newMockProducerConn(&producerConnDelegate{p}))
+
+	state := p.getState()
+	atomic.StoreInt32(&state, StateConnected)
+
+	p.setCloseChan(make(chan int))
 	go p.router()
 
 	startCh := make(chan struct{})

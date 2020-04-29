@@ -43,11 +43,44 @@ type msgResponse struct {
 	backoff bool
 }
 
+type MessageEventsHandler interface {
+	onMessageFinish(message *Message)
+	onMessageRequeue(message *Message, delay time.Duration, backoff bool)
+	onMessageTouch(message *Message)
+}
+
+type Conn interface {
+	fmt.Stringer
+	MessageEventsHandler
+
+	Connect() (*IdentifyResponse, error)
+	GetUnderlyingTCPConn() *net.TCPConn
+	Close() error
+	IsClosing() bool
+	RDY() int64
+	LastRDY() int64
+	SetRDY(rdy int64)
+	MaxRDY() int64
+	LastRdyTime() time.Time
+	LastMessageTime() time.Time
+	RemoteAddr() net.Addr
+	Read(p []byte) (int, error)
+	Write(p []byte) (int, error)
+	WriteCommand(cmd *Command) error
+	Flush() error
+	GetInflightMessageCount() *int64
+
+	SetLoggerForLevel(l logger, lvl LogLevel, format string)
+	SetLoggerLevel(lvl LogLevel)
+}
+
 // Conn represents a connection to nsqd
 //
 // Conn exposes a set of callbacks for the
 // various events that occur on a connection
-type Conn struct {
+type nsqdConn struct {
+	Conn
+
 	// 64bit atomic vars need to be first for proper alignment on 32bit platforms
 	messagesInFlight int64
 	maxRdyCount      int64
@@ -65,10 +98,7 @@ type Conn struct {
 
 	delegate ConnDelegate
 
-	logger   []logger
-	logLvl   LogLevel
-	logFmt   []string
-	logGuard sync.RWMutex
+	loggerCarrier LoggerCarrier
 
 	r io.Reader
 	w io.Writer
@@ -86,11 +116,11 @@ type Conn struct {
 }
 
 // NewConn returns a new Conn instance
-func NewConn(addr string, config *Config, delegate ConnDelegate) *Conn {
+func NewConn(addr string, config *Config, delegate ConnDelegate) Conn {
 	if !config.initialized {
 		panic("Config must be created with NewConfig()")
 	}
-	return &Conn{
+	return &nsqdConn{
 		addr: addr,
 
 		config:   config,
@@ -104,8 +134,7 @@ func NewConn(addr string, config *Config, delegate ConnDelegate) *Conn {
 		exitChan:        make(chan int),
 		drainReady:      make(chan int),
 
-		logger: make([]logger, LogLevelMax+1),
-		logFmt: make([]string, LogLevelMax+1),
+		loggerCarrier: NewDefaultLoggerCarrier(),
 	}
 }
 
@@ -121,56 +150,26 @@ func NewConn(addr string, config *Config, delegate ConnDelegate) *Conn {
 //
 //    Output(calldepth int, s string)
 //
-func (c *Conn) SetLogger(l logger, lvl LogLevel, format string) {
-	c.logGuard.Lock()
-	defer c.logGuard.Unlock()
-
-	if format == "" {
-		format = "(%s)"
-	}
-	for level := range c.logger {
-		c.logger[level] = l
-		c.logFmt[level] = format
-	}
-	c.logLvl = lvl
+func (c *nsqdConn) SetLogger(l logger, lvl LogLevel, format string) {
+	c.loggerCarrier.SetLogger(l, lvl, format)
 }
 
-func (c *Conn) SetLoggerForLevel(l logger, lvl LogLevel, format string) {
-	c.logGuard.Lock()
-	defer c.logGuard.Unlock()
-
+func (c *nsqdConn) SetLoggerForLevel(l logger, lvl LogLevel, format string) {
 	if format == "" {
 		format = "(%s)"
 	}
-	c.logger[lvl] = l
-	c.logFmt[lvl] = format
+
+	c.loggerCarrier.SetLoggerForLevel(l, lvl, format)
 }
 
 // SetLoggerLevel sets the package logging level.
-func (c *Conn) SetLoggerLevel(lvl LogLevel) {
-	c.logGuard.Lock()
-	defer c.logGuard.Unlock()
-
-	c.logLvl = lvl
-}
-
-func (c *Conn) getLogger(lvl LogLevel) (logger, LogLevel, string) {
-	c.logGuard.RLock()
-	defer c.logGuard.RUnlock()
-
-	return c.logger[lvl], c.logLvl, c.logFmt[lvl]
-}
-
-func (c *Conn) getLogLevel() LogLevel {
-	c.logGuard.RLock()
-	defer c.logGuard.RUnlock()
-
-	return c.logLvl
+func (c *nsqdConn) SetLoggerLevel(lvl LogLevel) {
+	c.loggerCarrier.SetLoggerLevel(lvl)
 }
 
 // Connect dials and bootstraps the nsqd connection
 // (including IDENTIFY) and returns the IdentifyResponse
-func (c *Conn) Connect() (*IdentifyResponse, error) {
+func (c *nsqdConn) Connect() (*IdentifyResponse, error) {
 	dialer := &net.Dialer{
 		LocalAddr: c.config.LocalAddr,
 		Timeout:   c.config.DialTimeout,
@@ -214,8 +213,12 @@ func (c *Conn) Connect() (*IdentifyResponse, error) {
 	return resp, nil
 }
 
+func (c *nsqdConn) GetUnderlyingTCPConn() *net.TCPConn {
+	return c.conn
+}
+
 // Close idempotently initiates connection close
-func (c *Conn) Close() error {
+func (c *nsqdConn) Close() error {
 	atomic.StoreInt32(&c.closeFlag, 1)
 	if c.conn != nil && atomic.LoadInt64(&c.messagesInFlight) == 0 {
 		return c.conn.CloseRead()
@@ -226,22 +229,22 @@ func (c *Conn) Close() error {
 // IsClosing indicates whether or not the
 // connection is currently in the processing of
 // gracefully closing
-func (c *Conn) IsClosing() bool {
+func (c *nsqdConn) IsClosing() bool {
 	return atomic.LoadInt32(&c.closeFlag) == 1
 }
 
 // RDY returns the current RDY count
-func (c *Conn) RDY() int64 {
+func (c *nsqdConn) RDY() int64 {
 	return atomic.LoadInt64(&c.rdyCount)
 }
 
 // LastRDY returns the previously set RDY count
-func (c *Conn) LastRDY() int64 {
+func (c *nsqdConn) LastRDY() int64 {
 	return atomic.LoadInt64(&c.rdyCount)
 }
 
 // SetRDY stores the specified RDY count
-func (c *Conn) SetRDY(rdy int64) {
+func (c *nsqdConn) SetRDY(rdy int64) {
 	atomic.StoreInt64(&c.rdyCount, rdy)
 	if rdy > 0 {
 		atomic.StoreInt64(&c.lastRdyTimestamp, time.Now().UnixNano())
@@ -250,47 +253,47 @@ func (c *Conn) SetRDY(rdy int64) {
 
 // MaxRDY returns the nsqd negotiated maximum
 // RDY count that it will accept for this connection
-func (c *Conn) MaxRDY() int64 {
+func (c *nsqdConn) MaxRDY() int64 {
 	return c.maxRdyCount
 }
 
 // LastRdyTime returns the time of the last non-zero RDY
 // update for this connection
-func (c *Conn) LastRdyTime() time.Time {
+func (c *nsqdConn) LastRdyTime() time.Time {
 	return time.Unix(0, atomic.LoadInt64(&c.lastRdyTimestamp))
 }
 
 // LastMessageTime returns a time.Time representing
 // the time at which the last message was received
-func (c *Conn) LastMessageTime() time.Time {
+func (c *nsqdConn) LastMessageTime() time.Time {
 	return time.Unix(0, atomic.LoadInt64(&c.lastMsgTimestamp))
 }
 
 // RemoteAddr returns the configured destination nsqd address
-func (c *Conn) RemoteAddr() net.Addr {
+func (c *nsqdConn) RemoteAddr() net.Addr {
 	return c.conn.RemoteAddr()
 }
 
 // String returns the fully-qualified address
-func (c *Conn) String() string {
+func (c *nsqdConn) String() string {
 	return c.addr
 }
 
 // Read performs a deadlined read on the underlying TCP connection
-func (c *Conn) Read(p []byte) (int, error) {
+func (c *nsqdConn) Read(p []byte) (int, error) {
 	c.conn.SetReadDeadline(time.Now().Add(c.config.ReadTimeout))
 	return c.r.Read(p)
 }
 
 // Write performs a deadlined write on the underlying TCP connection
-func (c *Conn) Write(p []byte) (int, error) {
+func (c *nsqdConn) Write(p []byte) (int, error) {
 	c.conn.SetWriteDeadline(time.Now().Add(c.config.WriteTimeout))
 	return c.w.Write(p)
 }
 
 // WriteCommand is a goroutine safe method to write a Command
 // to this connection, and flush.
-func (c *Conn) WriteCommand(cmd *Command) error {
+func (c *nsqdConn) WriteCommand(cmd *Command) error {
 	c.mtx.Lock()
 
 	_, err := cmd.WriteTo(c)
@@ -313,14 +316,14 @@ type flusher interface {
 }
 
 // Flush writes all buffered data to the underlying TCP connection
-func (c *Conn) Flush() error {
+func (c *nsqdConn) Flush() error {
 	if f, ok := c.w.(flusher); ok {
 		return f.Flush()
 	}
 	return nil
 }
 
-func (c *Conn) identify() (*IdentifyResponse, error) {
+func (c *nsqdConn) identify() (*IdentifyResponse, error) {
 	ci := make(map[string]interface{})
 	ci["client_id"] = c.config.ClientID
 	ci["hostname"] = c.config.Hostname
@@ -414,7 +417,7 @@ func (c *Conn) identify() (*IdentifyResponse, error) {
 	return resp, nil
 }
 
-func (c *Conn) upgradeTLS(tlsConf *tls.Config) error {
+func (c *nsqdConn) upgradeTLS(tlsConf *tls.Config) error {
 	host, _, err := net.SplitHostPort(c.addr)
 	if err != nil {
 		return err
@@ -444,7 +447,7 @@ func (c *Conn) upgradeTLS(tlsConf *tls.Config) error {
 	return nil
 }
 
-func (c *Conn) upgradeDeflate(level int) error {
+func (c *nsqdConn) upgradeDeflate(level int) error {
 	conn := net.Conn(c.conn)
 	if c.tlsConn != nil {
 		conn = c.tlsConn
@@ -462,7 +465,7 @@ func (c *Conn) upgradeDeflate(level int) error {
 	return nil
 }
 
-func (c *Conn) upgradeSnappy() error {
+func (c *nsqdConn) upgradeSnappy() error {
 	conn := net.Conn(c.conn)
 	if c.tlsConn != nil {
 		conn = c.tlsConn
@@ -479,7 +482,7 @@ func (c *Conn) upgradeSnappy() error {
 	return nil
 }
 
-func (c *Conn) auth(secret string) error {
+func (c *nsqdConn) auth(secret string) error {
 	cmd, err := Auth(secret)
 	if err != nil {
 		return err
@@ -511,7 +514,7 @@ func (c *Conn) auth(secret string) error {
 	return nil
 }
 
-func (c *Conn) readLoop() {
+func (c *nsqdConn) readLoop() {
 	delegate := &connMessageDelegate{c}
 	for {
 		if atomic.LoadInt32(&c.closeFlag) == 1 {
@@ -584,7 +587,7 @@ exit:
 	c.log(LogLevelInfo, "readLoop exiting")
 }
 
-func (c *Conn) writeLoop() {
+func (c *nsqdConn) writeLoop() {
 	for {
 		select {
 		case <-c.exitChan:
@@ -637,7 +640,11 @@ exit:
 	c.log(LogLevelInfo, "writeLoop exiting")
 }
 
-func (c *Conn) close() {
+func (c *nsqdConn) GetInflightMessageCount() *int64 {
+	return &c.messagesInFlight
+}
+
+func (c *nsqdConn) close() {
 	// a "clean" connection close is orchestrated as follows:
 	//
 	//     1. CLOSE cmd sent to nsqd
@@ -675,7 +682,7 @@ func (c *Conn) close() {
 	})
 }
 
-func (c *Conn) cleanup() {
+func (c *nsqdConn) cleanup() {
 	<-c.drainReady
 	ticker := time.NewTicker(100 * time.Millisecond)
 	lastWarning := time.Now()
@@ -716,7 +723,7 @@ exit:
 	c.log(LogLevelInfo, "finished draining, cleanup exiting")
 }
 
-func (c *Conn) waitForCleanup() {
+func (c *nsqdConn) waitForCleanup() {
 	// this blocks until readLoop and writeLoop
 	// (and cleanup goroutine above) have exited
 	c.wg.Wait()
@@ -725,11 +732,11 @@ func (c *Conn) waitForCleanup() {
 	c.delegate.OnClose(c)
 }
 
-func (c *Conn) onMessageFinish(m *Message) {
+func (c *nsqdConn) onMessageFinish(m *Message) {
 	c.msgResponseChan <- &msgResponse{msg: m, cmd: Finish(m.ID), success: true}
 }
 
-func (c *Conn) onMessageRequeue(m *Message, delay time.Duration, backoff bool) {
+func (c *nsqdConn) onMessageRequeue(m *Message, delay time.Duration, backoff bool) {
 	if delay == -1 {
 		// linear delay
 		delay = c.config.DefaultRequeueDelay * time.Duration(m.Attempts)
@@ -741,25 +748,13 @@ func (c *Conn) onMessageRequeue(m *Message, delay time.Duration, backoff bool) {
 	c.msgResponseChan <- &msgResponse{msg: m, cmd: Requeue(m.ID, delay), success: false, backoff: backoff}
 }
 
-func (c *Conn) onMessageTouch(m *Message) {
+func (c *nsqdConn) onMessageTouch(m *Message) {
 	select {
 	case c.cmdChan <- Touch(m.ID):
 	case <-c.exitChan:
 	}
 }
 
-func (c *Conn) log(lvl LogLevel, line string, args ...interface{}) {
-	logger, logLvl, logFmt := c.getLogger(lvl)
-
-	if logger == nil {
-		return
-	}
-
-	if logLvl > lvl {
-		return
-	}
-
-	logger.Output(2, fmt.Sprintf("%-4s %s %s", lvl,
-		fmt.Sprintf(logFmt, c.String()),
-		fmt.Sprintf(line, args...)))
+func (c *nsqdConn) log(lvl LogLevel, line string, args ...interface{}) {
+	c.loggerCarrier.Log(lvl, line, c.String(), args...)
 }

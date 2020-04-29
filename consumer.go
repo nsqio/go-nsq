@@ -118,8 +118,8 @@ type Consumer struct {
 	rdyRetryMtx    sync.Mutex
 	rdyRetryTimers map[string]*time.Timer
 
-	pendingConnections map[string]*Conn
-	connections        map[string]*Conn
+	pendingConnections map[string]Conn
+	connections        map[string]Conn
 
 	nsqdTCPAddrs []string
 
@@ -171,8 +171,8 @@ func NewConsumer(topic string, channel string, config *Config) (*Consumer, error
 		incomingMessages: make(chan *Message),
 
 		rdyRetryTimers:     make(map[string]*time.Timer),
-		pendingConnections: make(map[string]*Conn),
-		connections:        make(map[string]*Conn),
+		pendingConnections: make(map[string]Conn),
+		connections:        make(map[string]Conn),
 
 		lookupdRecheckChan: make(chan int, 1),
 
@@ -203,9 +203,9 @@ func (r *Consumer) Stats() *ConsumerStats {
 	}
 }
 
-func (r *Consumer) conns() []*Conn {
+func (r *Consumer) conns() []Conn {
 	r.mtx.RLock()
-	conns := make([]*Conn, 0, len(r.connections))
+	conns := make([]Conn, 0, len(r.connections))
 	for _, c := range r.connections {
 		conns = append(conns, c)
 	}
@@ -295,7 +295,7 @@ func (r *Consumer) perConnMaxInFlight() int64 {
 func (r *Consumer) IsStarved() bool {
 	for _, conn := range r.conns() {
 		threshold := int64(float64(conn.RDY()) * 0.85)
-		inFlight := atomic.LoadInt64(&conn.messagesInFlight)
+		inFlight := atomic.LoadInt64(conn.GetInflightMessageCount())
 		if inFlight >= threshold && inFlight > 0 && !conn.IsClosing() {
 			return true
 		}
@@ -671,32 +671,32 @@ func (r *Consumer) DisconnectFromNSQLookupd(addr string) error {
 	return nil
 }
 
-func (r *Consumer) onConnMessage(c *Conn, msg *Message) {
+func (r *Consumer) onConnMessage(c Conn, msg *Message) {
 	atomic.AddUint64(&r.messagesReceived, 1)
 	r.incomingMessages <- msg
 }
 
-func (r *Consumer) onConnMessageFinished(c *Conn, msg *Message) {
+func (r *Consumer) onConnMessageFinished(c Conn, msg *Message) {
 	atomic.AddUint64(&r.messagesFinished, 1)
 }
 
-func (r *Consumer) onConnMessageRequeued(c *Conn, msg *Message) {
+func (r *Consumer) onConnMessageRequeued(c Conn, msg *Message) {
 	atomic.AddUint64(&r.messagesRequeued, 1)
 }
 
-func (r *Consumer) onConnBackoff(c *Conn) {
+func (r *Consumer) onConnBackoff(c Conn) {
 	r.startStopContinueBackoff(c, backoffFlag)
 }
 
-func (r *Consumer) onConnContinue(c *Conn) {
+func (r *Consumer) onConnContinue(c Conn) {
 	r.startStopContinueBackoff(c, continueFlag)
 }
 
-func (r *Consumer) onConnResume(c *Conn) {
+func (r *Consumer) onConnResume(c Conn) {
 	r.startStopContinueBackoff(c, resumeFlag)
 }
 
-func (r *Consumer) onConnResponse(c *Conn, data []byte) {
+func (r *Consumer) onConnResponse(c Conn, data []byte) {
 	switch {
 	case bytes.Equal(data, []byte("CLOSE_WAIT")):
 		// server is ready for us to close (it ack'd our StartClose)
@@ -707,15 +707,15 @@ func (r *Consumer) onConnResponse(c *Conn, data []byte) {
 	}
 }
 
-func (r *Consumer) onConnError(c *Conn, data []byte) {}
+func (r *Consumer) onConnError(c Conn, data []byte) {}
 
-func (r *Consumer) onConnHeartbeat(c *Conn) {}
+func (r *Consumer) onConnHeartbeat(c Conn) {}
 
-func (r *Consumer) onConnIOError(c *Conn, err error) {
+func (r *Consumer) onConnIOError(c Conn, err error) {
 	c.Close()
 }
 
-func (r *Consumer) onConnClose(c *Conn) {
+func (r *Consumer) onConnClose(c Conn) {
 	var hasRDYRetryTimer bool
 
 	// remove this connections RDY count from the consumer's total
@@ -794,7 +794,7 @@ func (r *Consumer) onConnClose(c *Conn) {
 	}
 }
 
-func (r *Consumer) startStopContinueBackoff(conn *Conn, signal backoffSignal) {
+func (r *Consumer) startStopContinueBackoff(conn Conn, signal backoffSignal) {
 	// prevent many async failures/successes from immediately resulting in
 	// max backoff/normal rate (by ensuring that we dont continually incr/decr
 	// the counter during a backoff period)
@@ -897,7 +897,7 @@ func (r *Consumer) inBackoffTimeout() bool {
 	return atomic.LoadInt64(&r.backoffDuration) > 0
 }
 
-func (r *Consumer) maybeUpdateRDY(conn *Conn) {
+func (r *Consumer) maybeUpdateRDY(conn Conn) {
 	inBackoff := r.inBackoff()
 	inBackoffTimeout := r.inBackoffTimeout()
 	if inBackoff || inBackoffTimeout {
@@ -929,7 +929,7 @@ exit:
 	r.wg.Done()
 }
 
-func (r *Consumer) updateRDY(c *Conn, count int64) error {
+func (r *Consumer) updateRDY(c Conn, count int64) error {
 	if c.IsClosing() {
 		return ErrClosing
 	}
@@ -972,7 +972,7 @@ func (r *Consumer) updateRDY(c *Conn, count int64) error {
 	return r.sendRDY(c, count)
 }
 
-func (r *Consumer) sendRDY(c *Conn, count int64) error {
+func (r *Consumer) sendRDY(c Conn, count int64) error {
 	if count == 0 && c.LastRDY() == 0 {
 		// no need to send. It's already that RDY count
 		return nil
@@ -1022,7 +1022,7 @@ func (r *Consumer) redistributeRDY() {
 		return
 	}
 
-	possibleConns := make([]*Conn, 0, len(conns))
+	possibleConns := make([]Conn, 0, len(conns))
 	for _, c := range conns {
 		lastMsgDuration := time.Now().Sub(c.LastMessageTime())
 		lastRdyDuration := time.Now().Sub(c.LastRdyTime())

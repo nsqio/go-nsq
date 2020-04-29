@@ -187,8 +187,8 @@ func consumerTest(t *testing.T, cb func(c *Config)) {
 	}
 
 	conn := q.conns()[0]
-	if !strings.HasPrefix(conn.conn.LocalAddr().String(), laddr) {
-		t.Fatal("connection should be bound to the specified address:", conn.conn.LocalAddr())
+	if !strings.HasPrefix(conn.GetUnderlyingTCPConn().LocalAddr().String(), laddr) {
+		t.Fatal("connection should be bound to the specified address:", conn.GetUnderlyingTCPConn().LocalAddr())
 	}
 
 	err = q.DisconnectFromNSQD("1.2.3.4:4150")
