@@ -4,12 +4,10 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"log"
 	"math"
 	"math/rand"
 	"net"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,7 +30,7 @@ type Handler interface {
 // HandlerFunc is a convenience type to avoid having to declare a struct
 // to implement the Handler interface, it can be used like this:
 //
-// 	consumer.AddHandler(nsq.HandlerFunc(func(m *Message) error {
+// 	consumec.AddHandler(nsq.HandlerFunc(func(m *Message) error {
 // 		// handle the message
 // 	}))
 type HandlerFunc func(message *Message) error
@@ -74,6 +72,34 @@ const (
 	resumeFlag
 )
 
+type Consumer interface {
+	ConnEventsHandler
+	ConnEventsMessageHandler
+
+	SetLogger(l logger, lvl LogLevel)
+	SetLoggerLevel(lvl LogLevel)
+	SetLoggerForLevel(l logger, lvl LogLevel)
+
+	ConnectToNSQLookupd(addr string) error
+	ConnectToNSQLookupds(addresses []string) error
+	ConnectToNSQDs(addresses []string) error
+	ConnectToNSQD(addr string) error
+	DisconnectFromNSQD(addr string) error
+	DisconnectFromNSQLookupd(addr string) error
+
+	AddHandler(handler Handler)
+	AddConcurrentHandlers(handler Handler, concurrency int)
+
+	Stats() *ConsumerStats
+	SetBehaviorDelegate(cb interface{})
+
+	IsStarved() bool
+	ChangeMaxInFlight(maxInFlight int)
+	conns() []Conn
+	Stop()
+	GetStopChan() chan int
+}
+
 // Consumer is a high-level type to consume from NSQ.
 //
 // A Consumer instance is supplied a Handler that will be executed
@@ -83,7 +109,9 @@ const (
 //
 // If configured, it will poll nsqlookupd instances and handle connection (and
 // reconnection) to any discovered nsqds.
-type Consumer struct {
+type nsqConsumer struct {
+	Consumer
+
 	// 64bit atomic vars need to be first for proper alignment on 32bit platforms
 	messagesReceived uint64
 	messagesFinished uint64
@@ -95,9 +123,7 @@ type Consumer struct {
 
 	mtx sync.RWMutex
 
-	logger   []logger
-	logLvl   LogLevel
-	logGuard sync.RWMutex
+	loggerCarrier LoggerCarrier
 
 	behaviorDelegate interface{}
 
@@ -144,7 +170,7 @@ type Consumer struct {
 //
 // The only valid way to create a Config is via NewConfig, using a struct literal will panic.
 // After Config is passed into NewConsumer the values are no longer mutable (they are copied).
-func NewConsumer(topic string, channel string, config *Config) (*Consumer, error) {
+func NewConsumer(topic string, channel string, config *Config) (Consumer, error) {
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
@@ -157,16 +183,15 @@ func NewConsumer(topic string, channel string, config *Config) (*Consumer, error
 		return nil, errors.New("invalid channel name")
 	}
 
-	r := &Consumer{
+	c := &nsqConsumer{
 		id: atomic.AddInt64(&instCount, 1),
 
 		topic:   topic,
 		channel: channel,
 		config:  *config,
 
-		logger:      make([]logger, LogLevelMax+1),
-		logLvl:      LogLevelInfo,
-		maxInFlight: int32(config.MaxInFlight),
+		loggerCarrier: NewDefaultLoggerCarrier(),
+		maxInFlight:   int32(config.MaxInFlight),
 
 		incomingMessages: make(chan *Message),
 
@@ -182,34 +207,28 @@ func NewConsumer(topic string, channel string, config *Config) (*Consumer, error
 		exitChan: make(chan int),
 	}
 
-	// Set default logger for all log levels
-	l := log.New(os.Stderr, "", log.Flags())
-	for index := range r.logger {
-		r.logger[index] = l
-	}
-
-	r.wg.Add(1)
-	go r.rdyLoop()
-	return r, nil
+	c.wg.Add(1)
+	go c.rdyLoop()
+	return c, nil
 }
 
 // Stats retrieves the current connection and message statistics for a Consumer
-func (r *Consumer) Stats() *ConsumerStats {
+func (c *nsqConsumer) Stats() *ConsumerStats {
 	return &ConsumerStats{
-		MessagesReceived: atomic.LoadUint64(&r.messagesReceived),
-		MessagesFinished: atomic.LoadUint64(&r.messagesFinished),
-		MessagesRequeued: atomic.LoadUint64(&r.messagesRequeued),
-		Connections:      len(r.conns()),
+		MessagesReceived: atomic.LoadUint64(&c.messagesReceived),
+		MessagesFinished: atomic.LoadUint64(&c.messagesFinished),
+		MessagesRequeued: atomic.LoadUint64(&c.messagesRequeued),
+		Connections:      len(c.conns()),
 	}
 }
 
-func (r *Consumer) conns() []Conn {
-	r.mtx.RLock()
-	conns := make([]Conn, 0, len(r.connections))
-	for _, c := range r.connections {
+func (c *nsqConsumer) conns() []Conn {
+	c.mtx.RLock()
+	conns := make([]Conn, 0, len(c.connections))
+	for _, c := range c.connections {
 		conns = append(conns, c)
 	}
-	r.mtx.RUnlock()
+	c.mtx.RUnlock()
 	return conns
 }
 
@@ -220,44 +239,18 @@ func (r *Consumer) conns() []Conn {
 //
 //    Output(calldepth int, s string)
 //
-func (r *Consumer) SetLogger(l logger, lvl LogLevel) {
-	r.logGuard.Lock()
-	defer r.logGuard.Unlock()
-
-	for level := range r.logger {
-		r.logger[level] = l
-	}
-	r.logLvl = lvl
+func (c *nsqConsumer) SetLogger(l logger, lvl LogLevel) {
+	c.loggerCarrier.SetLogger(l, lvl, "")
 }
 
 // SetLoggerForLevel assigns the same logger for specified `level`.
-func (r *Consumer) SetLoggerForLevel(l logger, lvl LogLevel) {
-	r.logGuard.Lock()
-	defer r.logGuard.Unlock()
-
-	r.logger[lvl] = l
+func (c *nsqConsumer) SetLoggerForLevel(l logger, lvl LogLevel) {
+	c.loggerCarrier.SetLoggerForLevel(l, lvl, "")
 }
 
 // SetLoggerLevel sets the package logging level.
-func (r *Consumer) SetLoggerLevel(lvl LogLevel) {
-	r.logGuard.Lock()
-	defer r.logGuard.Unlock()
-
-	r.logLvl = lvl
-}
-
-func (r *Consumer) getLogger(lvl LogLevel) (logger, LogLevel) {
-	r.logGuard.RLock()
-	defer r.logGuard.RUnlock()
-
-	return r.logger[lvl], r.logLvl
-}
-
-func (r *Consumer) getLogLevel() LogLevel {
-	r.logGuard.RLock()
-	defer r.logGuard.RUnlock()
-
-	return r.logLvl
+func (c *nsqConsumer) SetLoggerLevel(lvl LogLevel) {
+	c.loggerCarrier.SetLoggerLevel(lvl)
 }
 
 // SetBehaviorDelegate takes a type implementing one or more
@@ -266,7 +259,7 @@ func (r *Consumer) getLogLevel() LogLevel {
 //
 //    DiscoveryFilter
 //
-func (r *Consumer) SetBehaviorDelegate(cb interface{}) {
+func (c *nsqConsumer) SetBehaviorDelegate(cb interface{}) {
 	matched := false
 
 	if _, ok := cb.(DiscoveryFilter); ok {
@@ -277,23 +270,23 @@ func (r *Consumer) SetBehaviorDelegate(cb interface{}) {
 		panic("behavior delegate does not have any recognized methods")
 	}
 
-	r.behaviorDelegate = cb
+	c.behaviorDelegate = cb
 }
 
 // perConnMaxInFlight calculates the per-connection max-in-flight count.
 //
 // This may change dynamically based on the number of connections to nsqd the Consumer
-// is responsible for.
-func (r *Consumer) perConnMaxInFlight() int64 {
-	b := float64(r.getMaxInFlight())
-	s := b / float64(len(r.conns()))
+// is responsible foc.
+func (c *nsqConsumer) perConnMaxInFlight() int64 {
+	b := float64(c.getMaxInFlight())
+	s := b / float64(len(c.conns()))
 	return int64(math.Min(math.Max(1, s), b))
 }
 
 // IsStarved indicates whether any connections for this consumer are blocked on processing
 // before being able to receive more messages (ie. RDY count of 0 and not exiting)
-func (r *Consumer) IsStarved() bool {
-	for _, conn := range r.conns() {
+func (c *nsqConsumer) IsStarved() bool {
+	for _, conn := range c.conns() {
 		threshold := int64(float64(conn.RDY()) * 0.85)
 		inFlight := atomic.LoadInt64(conn.GetInflightMessageCount())
 		if inFlight >= threshold && inFlight > 0 && !conn.IsClosing() {
@@ -303,8 +296,8 @@ func (r *Consumer) IsStarved() bool {
 	return false
 }
 
-func (r *Consumer) getMaxInFlight() int32 {
-	return atomic.LoadInt32(&r.maxInFlight)
+func (c *nsqConsumer) getMaxInFlight() int32 {
+	return atomic.LoadInt32(&c.maxInFlight)
 }
 
 // ChangeMaxInFlight sets a new maximum number of messages this comsumer instance
@@ -313,15 +306,15 @@ func (r *Consumer) getMaxInFlight() int32 {
 // For example, ChangeMaxInFlight(0) would pause message flow
 //
 // If already connected, it updates the reader RDY state for each connection.
-func (r *Consumer) ChangeMaxInFlight(maxInFlight int) {
-	if r.getMaxInFlight() == int32(maxInFlight) {
+func (c *nsqConsumer) ChangeMaxInFlight(maxInFlight int) {
+	if c.getMaxInFlight() == int32(maxInFlight) {
 		return
 	}
 
-	atomic.StoreInt32(&r.maxInFlight, int32(maxInFlight))
+	atomic.StoreInt32(&c.maxInFlight, int32(maxInFlight))
 
-	for _, c := range r.conns() {
-		r.maybeUpdateRDY(c)
+	for _, conn := range c.conns() {
+		c.maybeUpdateRDY(conn)
 	}
 }
 
@@ -331,11 +324,11 @@ func (r *Consumer) ChangeMaxInFlight(maxInFlight int) {
 // producers for the configured topic.
 //
 // A goroutine is spawned to handle continual polling.
-func (r *Consumer) ConnectToNSQLookupd(addr string) error {
-	if atomic.LoadInt32(&r.stopFlag) == 1 {
+func (c *nsqConsumer) ConnectToNSQLookupd(addr string) error {
+	if atomic.LoadInt32(&c.stopFlag) == 1 {
 		return errors.New("consumer stopped")
 	}
-	if atomic.LoadInt32(&r.runningHandlers) == 0 {
+	if atomic.LoadInt32(&c.runningHandlers) == 0 {
 		return errors.New("no handlers")
 	}
 
@@ -343,24 +336,24 @@ func (r *Consumer) ConnectToNSQLookupd(addr string) error {
 		return err
 	}
 
-	atomic.StoreInt32(&r.connectedFlag, 1)
+	atomic.StoreInt32(&c.connectedFlag, 1)
 
-	r.mtx.Lock()
-	for _, x := range r.lookupdHTTPAddrs {
+	c.mtx.Lock()
+	for _, x := range c.lookupdHTTPAddrs {
 		if x == addr {
-			r.mtx.Unlock()
+			c.mtx.Unlock()
 			return nil
 		}
 	}
-	r.lookupdHTTPAddrs = append(r.lookupdHTTPAddrs, addr)
-	numLookupd := len(r.lookupdHTTPAddrs)
-	r.mtx.Unlock()
+	c.lookupdHTTPAddrs = append(c.lookupdHTTPAddrs, addr)
+	numLookupd := len(c.lookupdHTTPAddrs)
+	c.mtx.Unlock()
 
 	// if this is the first one, kick off the go loop
 	if numLookupd == 1 {
-		r.queryLookupd()
-		r.wg.Add(1)
-		go r.lookupdLoop()
+		c.queryLookupd()
+		c.wg.Add(1)
+		go c.lookupdLoop()
 	}
 
 	return nil
@@ -372,9 +365,9 @@ func (r *Consumer) ConnectToNSQLookupd(addr string) error {
 // producers for the configured topic.
 //
 // A goroutine is spawned to handle continual polling.
-func (r *Consumer) ConnectToNSQLookupds(addresses []string) error {
+func (c *nsqConsumer) ConnectToNSQLookupds(addresses []string) error {
 	for _, addr := range addresses {
-		err := r.ConnectToNSQLookupd(addr)
+		err := c.ConnectToNSQLookupd(addr)
 		if err != nil {
 			return err
 		}
@@ -397,30 +390,30 @@ func validatedLookupAddr(addr string) error {
 }
 
 // poll all known lookup servers every LookupdPollInterval
-func (r *Consumer) lookupdLoop() {
+func (c *nsqConsumer) lookupdLoop() {
 	// add some jitter so that multiple consumers discovering the same topic,
 	// when restarted at the same time, dont all connect at once.
-	r.rngMtx.Lock()
-	jitter := time.Duration(int64(r.rng.Float64() *
-		r.config.LookupdPollJitter * float64(r.config.LookupdPollInterval)))
-	r.rngMtx.Unlock()
+	c.rngMtx.Lock()
+	jitter := time.Duration(int64(c.rng.Float64() *
+		c.config.LookupdPollJitter * float64(c.config.LookupdPollInterval)))
+	c.rngMtx.Unlock()
 	var ticker *time.Ticker
 
 	select {
 	case <-time.After(jitter):
-	case <-r.exitChan:
+	case <-c.exitChan:
 		goto exit
 	}
 
-	ticker = time.NewTicker(r.config.LookupdPollInterval)
+	ticker = time.NewTicker(c.config.LookupdPollInterval)
 
 	for {
 		select {
 		case <-ticker.C:
-			r.queryLookupd()
-		case <-r.lookupdRecheckChan:
-			r.queryLookupd()
-		case <-r.exitChan:
+			c.queryLookupd()
+		case <-c.lookupdRecheckChan:
+			c.queryLookupd()
+		case <-c.exitChan:
 			goto exit
 		}
 	}
@@ -429,21 +422,21 @@ exit:
 	if ticker != nil {
 		ticker.Stop()
 	}
-	r.log(LogLevelInfo, "exiting lookupdLoop")
-	r.wg.Done()
+	c.log(LogLevelInfo, "exiting lookupdLoop")
+	c.wg.Done()
 }
 
 // return the next lookupd endpoint to query
 // keeping track of which one was last used
-func (r *Consumer) nextLookupdEndpoint() string {
-	r.mtx.RLock()
-	if r.lookupdQueryIndex >= len(r.lookupdHTTPAddrs) {
-		r.lookupdQueryIndex = 0
+func (c *nsqConsumer) nextLookupdEndpoint() string {
+	c.mtx.RLock()
+	if c.lookupdQueryIndex >= len(c.lookupdHTTPAddrs) {
+		c.lookupdQueryIndex = 0
 	}
-	addr := r.lookupdHTTPAddrs[r.lookupdQueryIndex]
-	num := len(r.lookupdHTTPAddrs)
-	r.mtx.RUnlock()
-	r.lookupdQueryIndex = (r.lookupdQueryIndex + 1) % num
+	addr := c.lookupdHTTPAddrs[c.lookupdQueryIndex]
+	num := len(c.lookupdHTTPAddrs)
+	c.mtx.RUnlock()
+	c.lookupdQueryIndex = (c.lookupdQueryIndex + 1) % num
 
 	urlString := addr
 	if !strings.Contains(urlString, "://") {
@@ -459,7 +452,7 @@ func (r *Consumer) nextLookupdEndpoint() string {
 	}
 
 	v, err := url.ParseQuery(u.RawQuery)
-	v.Add("topic", r.topic)
+	v.Add("topic", c.topic)
 	u.RawQuery = v.Encode()
 	return u.String()
 }
@@ -483,21 +476,21 @@ type peerInfo struct {
 // which nsqd's provide the topic we are consuming.
 //
 // initiate a connection to any new producers that are identified.
-func (r *Consumer) queryLookupd() {
+func (c *nsqConsumer) queryLookupd() {
 	retries := 0
 
 retry:
-	endpoint := r.nextLookupdEndpoint()
+	endpoint := c.nextLookupdEndpoint()
 
-	r.log(LogLevelInfo, "querying nsqlookupd %s", endpoint)
+	c.log(LogLevelInfo, "querying nsqlookupd %s", endpoint)
 
 	var data lookupResp
 	err := apiRequestNegotiateV1("GET", endpoint, nil, &data)
 	if err != nil {
-		r.log(LogLevelError, "error querying nsqlookupd (%s) - %s", endpoint, err)
+		c.log(LogLevelError, "error querying nsqlookupd (%s) - %s", endpoint, err)
 		retries++
 		if retries < 3 {
-			r.log(LogLevelInfo, "retrying with next nsqlookupd")
+			c.log(LogLevelInfo, "retrying with next nsqlookupd")
 			goto retry
 		}
 		return
@@ -511,13 +504,13 @@ retry:
 		nsqdAddrs = append(nsqdAddrs, joined)
 	}
 	// apply filter
-	if discoveryFilter, ok := r.behaviorDelegate.(DiscoveryFilter); ok {
+	if discoveryFilter, ok := c.behaviorDelegate.(DiscoveryFilter); ok {
 		nsqdAddrs = discoveryFilter.Filter(nsqdAddrs)
 	}
 	for _, addr := range nsqdAddrs {
-		err = r.ConnectToNSQD(addr)
+		err = c.ConnectToNSQD(addr)
 		if err != nil && err != ErrAlreadyConnected {
-			r.log(LogLevelError, "(%s) error connecting to nsqd - %s", addr, err)
+			c.log(LogLevelError, "(%s) error connecting to nsqd - %s", addr, err)
 			continue
 		}
 	}
@@ -527,9 +520,9 @@ retry:
 //
 // It is recommended to use ConnectToNSQLookupd so that topics are discovered
 // automatically.  This method is useful when you want to connect to local instance.
-func (r *Consumer) ConnectToNSQDs(addresses []string) error {
+func (c *nsqConsumer) ConnectToNSQDs(addresses []string) error {
 	for _, addr := range addresses {
-		err := r.ConnectToNSQD(addr)
+		err := c.ConnectToNSQD(addr)
 		if err != nil {
 			return err
 		}
@@ -542,42 +535,42 @@ func (r *Consumer) ConnectToNSQDs(addresses []string) error {
 // It is recommended to use ConnectToNSQLookupd so that topics are discovered
 // automatically.  This method is useful when you want to connect to a single, local,
 // instance.
-func (r *Consumer) ConnectToNSQD(addr string) error {
-	if atomic.LoadInt32(&r.stopFlag) == 1 {
+func (c *nsqConsumer) ConnectToNSQD(addr string) error {
+	if atomic.LoadInt32(&c.stopFlag) == 1 {
 		return errors.New("consumer stopped")
 	}
 
-	if atomic.LoadInt32(&r.runningHandlers) == 0 {
+	if atomic.LoadInt32(&c.runningHandlers) == 0 {
 		return errors.New("no handlers")
 	}
 
-	atomic.StoreInt32(&r.connectedFlag, 1)
+	atomic.StoreInt32(&c.connectedFlag, 1)
 
-	conn := NewConn(addr, &r.config, &consumerConnDelegate{r})
-	conn.SetLoggerLevel(r.getLogLevel())
-	format := fmt.Sprintf("%3d [%s/%s] (%%s)", r.id, r.topic, r.channel)
-	for index := range r.logger {
-		conn.SetLoggerForLevel(r.logger[index], LogLevel(index), format)
+	conn := NewConn(addr, &c.config, &consumerConnDelegate{c})
+	conn.SetLoggerLevel(c.loggerCarrier.GetLogLevel())
+	format := fmt.Sprintf("%3d [%s/%s] (%%s)", c.id, c.topic, c.channel)
+	for index, logger := range c.loggerCarrier.GetLoggers() {
+		conn.SetLoggerForLevel(logger, LogLevel(index), format)
 	}
-	r.mtx.Lock()
-	_, pendingOk := r.pendingConnections[addr]
-	_, ok := r.connections[addr]
+	c.mtx.Lock()
+	_, pendingOk := c.pendingConnections[addr]
+	_, ok := c.connections[addr]
 	if ok || pendingOk {
-		r.mtx.Unlock()
+		c.mtx.Unlock()
 		return ErrAlreadyConnected
 	}
-	r.pendingConnections[addr] = conn
-	if idx := indexOf(addr, r.nsqdTCPAddrs); idx == -1 {
-		r.nsqdTCPAddrs = append(r.nsqdTCPAddrs, addr)
+	c.pendingConnections[addr] = conn
+	if idx := indexOf(addr, c.nsqdTCPAddrs); idx == -1 {
+		c.nsqdTCPAddrs = append(c.nsqdTCPAddrs, addr)
 	}
-	r.mtx.Unlock()
+	c.mtx.Unlock()
 
-	r.log(LogLevelInfo, "(%s) connecting to nsqd", addr)
+	c.log(LogLevelInfo, "(%s) connecting to nsqd", addr)
 
 	cleanupConnection := func() {
-		r.mtx.Lock()
-		delete(r.pendingConnections, addr)
-		r.mtx.Unlock()
+		c.mtx.Lock()
+		delete(c.pendingConnections, addr)
+		c.mtx.Unlock()
 		conn.Close()
 	}
 
@@ -588,29 +581,29 @@ func (r *Consumer) ConnectToNSQD(addr string) error {
 	}
 
 	if resp != nil {
-		if resp.MaxRdyCount < int64(r.getMaxInFlight()) {
-			r.log(LogLevelWarning,
+		if resp.MaxRdyCount < int64(c.getMaxInFlight()) {
+			c.log(LogLevelWarning,
 				"(%s) max RDY count %d < consumer max in flight %d, truncation possible",
-				conn.String(), resp.MaxRdyCount, r.getMaxInFlight())
+				conn.String(), resp.MaxRdyCount, c.getMaxInFlight())
 		}
 	}
 
-	cmd := Subscribe(r.topic, r.channel)
+	cmd := Subscribe(c.topic, c.channel)
 	err = conn.WriteCommand(cmd)
 	if err != nil {
 		cleanupConnection()
 		return fmt.Errorf("[%s] failed to subscribe to %s:%s - %s",
-			conn, r.topic, r.channel, err.Error())
+			conn, c.topic, c.channel, err.Error())
 	}
 
-	r.mtx.Lock()
-	delete(r.pendingConnections, addr)
-	r.connections[addr] = conn
-	r.mtx.Unlock()
+	c.mtx.Lock()
+	delete(c.pendingConnections, addr)
+	c.connections[addr] = conn
+	c.mtx.Unlock()
 
 	// pre-emptive signal to existing connections to lower their RDY count
-	for _, c := range r.conns() {
-		r.maybeUpdateRDY(c)
+	for _, conn := range c.conns() {
+		c.maybeUpdateRDY(conn)
 	}
 
 	return nil
@@ -627,20 +620,20 @@ func indexOf(n string, h []string) int {
 
 // DisconnectFromNSQD closes the connection to and removes the specified
 // `nsqd` address from the list
-func (r *Consumer) DisconnectFromNSQD(addr string) error {
-	r.mtx.Lock()
-	defer r.mtx.Unlock()
+func (c *nsqConsumer) DisconnectFromNSQD(addr string) error {
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
 
-	idx := indexOf(addr, r.nsqdTCPAddrs)
+	idx := indexOf(addr, c.nsqdTCPAddrs)
 	if idx == -1 {
 		return ErrNotConnected
 	}
 
 	// slice delete
-	r.nsqdTCPAddrs = append(r.nsqdTCPAddrs[:idx], r.nsqdTCPAddrs[idx+1:]...)
+	c.nsqdTCPAddrs = append(c.nsqdTCPAddrs[:idx], c.nsqdTCPAddrs[idx+1:]...)
 
-	pendingConn, pendingOk := r.pendingConnections[addr]
-	conn, ok := r.connections[addr]
+	pendingConn, pendingOk := c.pendingConnections[addr]
+	conn, ok := c.connections[addr]
 
 	if ok {
 		conn.Close()
@@ -653,117 +646,117 @@ func (r *Consumer) DisconnectFromNSQD(addr string) error {
 
 // DisconnectFromNSQLookupd removes the specified `nsqlookupd` address
 // from the list used for periodic discovery.
-func (r *Consumer) DisconnectFromNSQLookupd(addr string) error {
-	r.mtx.Lock()
-	defer r.mtx.Unlock()
+func (c *nsqConsumer) DisconnectFromNSQLookupd(addr string) error {
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
 
-	idx := indexOf(addr, r.lookupdHTTPAddrs)
+	idx := indexOf(addr, c.lookupdHTTPAddrs)
 	if idx == -1 {
 		return ErrNotConnected
 	}
 
-	if len(r.lookupdHTTPAddrs) == 1 {
+	if len(c.lookupdHTTPAddrs) == 1 {
 		return fmt.Errorf("cannot disconnect from only remaining nsqlookupd HTTP address %s", addr)
 	}
 
-	r.lookupdHTTPAddrs = append(r.lookupdHTTPAddrs[:idx], r.lookupdHTTPAddrs[idx+1:]...)
+	c.lookupdHTTPAddrs = append(c.lookupdHTTPAddrs[:idx], c.lookupdHTTPAddrs[idx+1:]...)
 
 	return nil
 }
 
-func (r *Consumer) onConnMessage(c Conn, msg *Message) {
-	atomic.AddUint64(&r.messagesReceived, 1)
-	r.incomingMessages <- msg
+func (c *nsqConsumer) onConnMessage(conn Conn, msg *Message) {
+	atomic.AddUint64(&c.messagesReceived, 1)
+	c.incomingMessages <- msg
 }
 
-func (r *Consumer) onConnMessageFinished(c Conn, msg *Message) {
-	atomic.AddUint64(&r.messagesFinished, 1)
+func (c *nsqConsumer) onConnMessageFinished(conn Conn, msg *Message) {
+	atomic.AddUint64(&c.messagesFinished, 1)
 }
 
-func (r *Consumer) onConnMessageRequeued(c Conn, msg *Message) {
-	atomic.AddUint64(&r.messagesRequeued, 1)
+func (c *nsqConsumer) onConnMessageRequeued(conn Conn, msg *Message) {
+	atomic.AddUint64(&c.messagesRequeued, 1)
 }
 
-func (r *Consumer) onConnBackoff(c Conn) {
-	r.startStopContinueBackoff(c, backoffFlag)
+func (c *nsqConsumer) onConnBackoff(conn Conn) {
+	c.startStopContinueBackoff(conn, backoffFlag)
 }
 
-func (r *Consumer) onConnContinue(c Conn) {
-	r.startStopContinueBackoff(c, continueFlag)
+func (c *nsqConsumer) onConnContinue(conn Conn) {
+	c.startStopContinueBackoff(conn, continueFlag)
 }
 
-func (r *Consumer) onConnResume(c Conn) {
-	r.startStopContinueBackoff(c, resumeFlag)
+func (c *nsqConsumer) onConnResume(conn Conn) {
+	c.startStopContinueBackoff(conn, resumeFlag)
 }
 
-func (r *Consumer) onConnResponse(c Conn, data []byte) {
+func (c *nsqConsumer) onConnResponse(conn Conn, data []byte) {
 	switch {
 	case bytes.Equal(data, []byte("CLOSE_WAIT")):
 		// server is ready for us to close (it ack'd our StartClose)
 		// we can assume we will not receive any more messages over this channel
 		// (but we can still write back responses)
-		r.log(LogLevelInfo, "(%s) received CLOSE_WAIT from nsqd", c.String())
-		c.Close()
+		c.log(LogLevelInfo, "(%s) received CLOSE_WAIT from nsqd", conn.String())
+		conn.Close()
 	}
 }
 
-func (r *Consumer) onConnError(c Conn, data []byte) {}
+func (c *nsqConsumer) onConnError(conn Conn, data []byte) {}
 
-func (r *Consumer) onConnHeartbeat(c Conn) {}
+func (c *nsqConsumer) onConnHeartbeat(conn Conn) {}
 
-func (r *Consumer) onConnIOError(c Conn, err error) {
-	c.Close()
+func (c *nsqConsumer) onConnIOError(conn Conn, err error) {
+	conn.Close()
 }
 
-func (r *Consumer) onConnClose(c Conn) {
+func (c *nsqConsumer) onConnClose(conn Conn) {
 	var hasRDYRetryTimer bool
 
 	// remove this connections RDY count from the consumer's total
-	rdyCount := c.RDY()
-	atomic.AddInt64(&r.totalRdyCount, -rdyCount)
+	rdyCount := conn.RDY()
+	atomic.AddInt64(&c.totalRdyCount, -rdyCount)
 
-	r.rdyRetryMtx.Lock()
-	if timer, ok := r.rdyRetryTimers[c.String()]; ok {
+	c.rdyRetryMtx.Lock()
+	if timer, ok := c.rdyRetryTimers[conn.String()]; ok {
 		// stop any pending retry of an old RDY update
 		timer.Stop()
-		delete(r.rdyRetryTimers, c.String())
+		delete(c.rdyRetryTimers, conn.String())
 		hasRDYRetryTimer = true
 	}
-	r.rdyRetryMtx.Unlock()
+	c.rdyRetryMtx.Unlock()
 
-	r.mtx.Lock()
-	delete(r.connections, c.String())
-	left := len(r.connections)
-	r.mtx.Unlock()
+	c.mtx.Lock()
+	delete(c.connections, conn.String())
+	left := len(c.connections)
+	c.mtx.Unlock()
 
-	r.log(LogLevelWarning, "there are %d connections left alive", left)
+	c.log(LogLevelWarning, "there are %d connections left alive", left)
 
 	if (hasRDYRetryTimer || rdyCount > 0) &&
-		(int32(left) == r.getMaxInFlight() || r.inBackoff()) {
+		(int32(left) == c.getMaxInFlight() || c.inBackoff()) {
 		// we're toggling out of (normal) redistribution cases and this conn
 		// had a RDY count...
 		//
 		// trigger RDY redistribution to make sure this RDY is moved
 		// to a new connection
-		atomic.StoreInt32(&r.needRDYRedistributed, 1)
+		atomic.StoreInt32(&c.needRDYRedistributed, 1)
 	}
 
 	// we were the last one (and stopping)
-	if atomic.LoadInt32(&r.stopFlag) == 1 {
+	if atomic.LoadInt32(&c.stopFlag) == 1 {
 		if left == 0 {
-			r.stopHandlers()
+			c.stopHandlers()
 		}
 		return
 	}
 
-	r.mtx.RLock()
-	numLookupd := len(r.lookupdHTTPAddrs)
-	reconnect := indexOf(c.String(), r.nsqdTCPAddrs) >= 0
-	r.mtx.RUnlock()
+	c.mtx.RLock()
+	numLookupd := len(c.lookupdHTTPAddrs)
+	reconnect := indexOf(conn.String(), c.nsqdTCPAddrs) >= 0
+	c.mtx.RUnlock()
 	if numLookupd > 0 {
 		// trigger a poll of the lookupd
 		select {
-		case r.lookupdRecheckChan <- 1:
+		case c.lookupdRecheckChan <- 1:
 		default:
 		}
 	} else if reconnect {
@@ -771,42 +764,42 @@ func (r *Consumer) onConnClose(c Conn) {
 		// try to reconnect after a bit
 		go func(addr string) {
 			for {
-				r.log(LogLevelInfo, "(%s) re-connecting in %s", addr, r.config.LookupdPollInterval)
-				time.Sleep(r.config.LookupdPollInterval)
-				if atomic.LoadInt32(&r.stopFlag) == 1 {
+				c.log(LogLevelInfo, "(%s) re-connecting in %s", addr, c.config.LookupdPollInterval)
+				time.Sleep(c.config.LookupdPollInterval)
+				if atomic.LoadInt32(&c.stopFlag) == 1 {
 					break
 				}
-				r.mtx.RLock()
-				reconnect := indexOf(addr, r.nsqdTCPAddrs) >= 0
-				r.mtx.RUnlock()
+				c.mtx.RLock()
+				reconnect := indexOf(addr, c.nsqdTCPAddrs) >= 0
+				c.mtx.RUnlock()
 				if !reconnect {
-					r.log(LogLevelWarning, "(%s) skipped reconnect after removal...", addr)
+					c.log(LogLevelWarning, "(%s) skipped reconnect after removal...", addr)
 					return
 				}
-				err := r.ConnectToNSQD(addr)
+				err := c.ConnectToNSQD(addr)
 				if err != nil && err != ErrAlreadyConnected {
-					r.log(LogLevelError, "(%s) error connecting to nsqd - %s", addr, err)
+					c.log(LogLevelError, "(%s) error connecting to nsqd - %s", addr, err)
 					continue
 				}
 				break
 			}
-		}(c.String())
+		}(conn.String())
 	}
 }
 
-func (r *Consumer) startStopContinueBackoff(conn Conn, signal backoffSignal) {
+func (c *nsqConsumer) startStopContinueBackoff(conn Conn, signal backoffSignal) {
 	// prevent many async failures/successes from immediately resulting in
 	// max backoff/normal rate (by ensuring that we dont continually incr/decr
 	// the counter during a backoff period)
-	r.backoffMtx.Lock()
-	defer r.backoffMtx.Unlock()
-	if r.inBackoffTimeout() {
+	c.backoffMtx.Lock()
+	defer c.backoffMtx.Unlock()
+	if c.inBackoffTimeout() {
 		return
 	}
 
 	// update backoff state
 	backoffUpdated := false
-	backoffCounter := atomic.LoadInt32(&r.backoffCounter)
+	backoffCounter := atomic.LoadInt32(&c.backoffCounter)
 	switch signal {
 	case resumeFlag:
 		if backoffCounter > 0 {
@@ -814,143 +807,143 @@ func (r *Consumer) startStopContinueBackoff(conn Conn, signal backoffSignal) {
 			backoffUpdated = true
 		}
 	case backoffFlag:
-		nextBackoff := r.config.BackoffStrategy.Calculate(int(backoffCounter) + 1)
-		if nextBackoff <= r.config.MaxBackoffDuration {
+		nextBackoff := c.config.BackoffStrategy.Calculate(int(backoffCounter) + 1)
+		if nextBackoff <= c.config.MaxBackoffDuration {
 			backoffCounter++
 			backoffUpdated = true
 		}
 	}
-	atomic.StoreInt32(&r.backoffCounter, backoffCounter)
+	atomic.StoreInt32(&c.backoffCounter, backoffCounter)
 
-	if r.backoffCounter == 0 && backoffUpdated {
+	if c.backoffCounter == 0 && backoffUpdated {
 		// exit backoff
-		count := r.perConnMaxInFlight()
-		r.log(LogLevelWarning, "exiting backoff, returning all to RDY %d", count)
-		for _, c := range r.conns() {
-			r.updateRDY(c, count)
+		count := c.perConnMaxInFlight()
+		c.log(LogLevelWarning, "exiting backoff, returning all to RDY %d", count)
+		for _, conn := range c.conns() {
+			c.updateRDY(conn, count)
 		}
-	} else if r.backoffCounter > 0 {
+	} else if c.backoffCounter > 0 {
 		// start or continue backoff
-		backoffDuration := r.config.BackoffStrategy.Calculate(int(backoffCounter))
+		backoffDuration := c.config.BackoffStrategy.Calculate(int(backoffCounter))
 
-		if backoffDuration > r.config.MaxBackoffDuration {
-			backoffDuration = r.config.MaxBackoffDuration
+		if backoffDuration > c.config.MaxBackoffDuration {
+			backoffDuration = c.config.MaxBackoffDuration
 		}
 
-		r.log(LogLevelWarning, "backing off for %s (backoff level %d), setting all to RDY 0",
+		c.log(LogLevelWarning, "backing off for %s (backoff level %d), setting all to RDY 0",
 			backoffDuration, backoffCounter)
 
 		// send RDY 0 immediately (to *all* connections)
-		for _, c := range r.conns() {
-			r.updateRDY(c, 0)
+		for _, conn := range c.conns() {
+			c.updateRDY(conn, 0)
 		}
 
-		r.backoff(backoffDuration)
+		c.backoff(backoffDuration)
 	}
 }
 
-func (r *Consumer) backoff(d time.Duration) {
-	atomic.StoreInt64(&r.backoffDuration, d.Nanoseconds())
-	time.AfterFunc(d, r.resume)
+func (c *nsqConsumer) backoff(d time.Duration) {
+	atomic.StoreInt64(&c.backoffDuration, d.Nanoseconds())
+	time.AfterFunc(d, c.resume)
 }
 
-func (r *Consumer) resume() {
-	if atomic.LoadInt32(&r.stopFlag) == 1 {
-		atomic.StoreInt64(&r.backoffDuration, 0)
+func (c *nsqConsumer) resume() {
+	if atomic.LoadInt32(&c.stopFlag) == 1 {
+		atomic.StoreInt64(&c.backoffDuration, 0)
 		return
 	}
 
 	// pick a random connection to test the waters
-	conns := r.conns()
+	conns := c.conns()
 	if len(conns) == 0 {
-		r.log(LogLevelWarning, "no connection available to resume")
-		r.log(LogLevelWarning, "backing off for %s", time.Second)
-		r.backoff(time.Second)
+		c.log(LogLevelWarning, "no connection available to resume")
+		c.log(LogLevelWarning, "backing off for %s", time.Second)
+		c.backoff(time.Second)
 		return
 	}
-	r.rngMtx.Lock()
-	idx := r.rng.Intn(len(conns))
-	r.rngMtx.Unlock()
+	c.rngMtx.Lock()
+	idx := c.rng.Intn(len(conns))
+	c.rngMtx.Unlock()
 	choice := conns[idx]
 
-	r.log(LogLevelWarning,
+	c.log(LogLevelWarning,
 		"(%s) backoff timeout expired, sending RDY 1",
 		choice.String())
 
 	// while in backoff only ever let 1 message at a time through
-	err := r.updateRDY(choice, 1)
+	err := c.updateRDY(choice, 1)
 	if err != nil {
-		r.log(LogLevelWarning, "(%s) error resuming RDY 1 - %s", choice.String(), err)
-		r.log(LogLevelWarning, "backing off for %s", time.Second)
-		r.backoff(time.Second)
+		c.log(LogLevelWarning, "(%s) error resuming RDY 1 - %s", choice.String(), err)
+		c.log(LogLevelWarning, "backing off for %s", time.Second)
+		c.backoff(time.Second)
 		return
 	}
 
-	atomic.StoreInt64(&r.backoffDuration, 0)
+	atomic.StoreInt64(&c.backoffDuration, 0)
 }
 
-func (r *Consumer) inBackoff() bool {
-	return atomic.LoadInt32(&r.backoffCounter) > 0
+func (c *nsqConsumer) inBackoff() bool {
+	return atomic.LoadInt32(&c.backoffCounter) > 0
 }
 
-func (r *Consumer) inBackoffTimeout() bool {
-	return atomic.LoadInt64(&r.backoffDuration) > 0
+func (c *nsqConsumer) inBackoffTimeout() bool {
+	return atomic.LoadInt64(&c.backoffDuration) > 0
 }
 
-func (r *Consumer) maybeUpdateRDY(conn Conn) {
-	inBackoff := r.inBackoff()
-	inBackoffTimeout := r.inBackoffTimeout()
+func (c *nsqConsumer) maybeUpdateRDY(conn Conn) {
+	inBackoff := c.inBackoff()
+	inBackoffTimeout := c.inBackoffTimeout()
 	if inBackoff || inBackoffTimeout {
-		r.log(LogLevelDebug, "(%s) skip sending RDY inBackoff:%v || inBackoffTimeout:%v",
+		c.log(LogLevelDebug, "(%s) skip sending RDY inBackoff:%v || inBackoffTimeout:%v",
 			conn, inBackoff, inBackoffTimeout)
 		return
 	}
 
-	count := r.perConnMaxInFlight()
-	r.log(LogLevelDebug, "(%s) sending RDY %d", conn, count)
-	r.updateRDY(conn, count)
+	count := c.perConnMaxInFlight()
+	c.log(LogLevelDebug, "(%s) sending RDY %d", conn, count)
+	c.updateRDY(conn, count)
 }
 
-func (r *Consumer) rdyLoop() {
-	redistributeTicker := time.NewTicker(r.config.RDYRedistributeInterval)
+func (c *nsqConsumer) rdyLoop() {
+	redistributeTicker := time.NewTicker(c.config.RDYRedistributeInterval)
 
 	for {
 		select {
 		case <-redistributeTicker.C:
-			r.redistributeRDY()
-		case <-r.exitChan:
+			c.redistributeRDY()
+		case <-c.exitChan:
 			goto exit
 		}
 	}
 
 exit:
 	redistributeTicker.Stop()
-	r.log(LogLevelInfo, "rdyLoop exiting")
-	r.wg.Done()
+	c.log(LogLevelInfo, "rdyLoop exiting")
+	c.wg.Done()
 }
 
-func (r *Consumer) updateRDY(c Conn, count int64) error {
-	if c.IsClosing() {
+func (c *nsqConsumer) updateRDY(conn Conn, count int64) error {
+	if conn.IsClosing() {
 		return ErrClosing
 	}
 
 	// never exceed the nsqd's configured max RDY count
-	if count > c.MaxRDY() {
-		count = c.MaxRDY()
+	if count > conn.MaxRDY() {
+		count = conn.MaxRDY()
 	}
 
 	// stop any pending retry of an old RDY update
-	r.rdyRetryMtx.Lock()
-	if timer, ok := r.rdyRetryTimers[c.String()]; ok {
+	c.rdyRetryMtx.Lock()
+	if timer, ok := c.rdyRetryTimers[conn.String()]; ok {
 		timer.Stop()
-		delete(r.rdyRetryTimers, c.String())
+		delete(c.rdyRetryTimers, conn.String())
 	}
-	r.rdyRetryMtx.Unlock()
+	c.rdyRetryMtx.Unlock()
 
 	// never exceed our global max in flight. truncate if possible.
 	// this could help a new connection get partial max-in-flight
-	rdyCount := c.RDY()
-	maxPossibleRdy := int64(r.getMaxInFlight()) - atomic.LoadInt64(&r.totalRdyCount) + rdyCount
+	rdyCount := conn.RDY()
+	maxPossibleRdy := int64(c.getMaxInFlight()) - atomic.LoadInt64(&c.totalRdyCount) + rdyCount
 	if maxPossibleRdy > 0 && maxPossibleRdy < count {
 		count = maxPossibleRdy
 	}
@@ -959,123 +952,123 @@ func (r *Consumer) updateRDY(c Conn, count int64) error {
 			// we wanted to exit a zero RDY count but we couldn't send it...
 			// in order to prevent eternal starvation we reschedule this attempt
 			// (if any other RDY update succeeds this timer will be stopped)
-			r.rdyRetryMtx.Lock()
-			r.rdyRetryTimers[c.String()] = time.AfterFunc(5*time.Second,
+			c.rdyRetryMtx.Lock()
+			c.rdyRetryTimers[conn.String()] = time.AfterFunc(5*time.Second,
 				func() {
-					r.updateRDY(c, count)
+					c.updateRDY(conn, count)
 				})
-			r.rdyRetryMtx.Unlock()
+			c.rdyRetryMtx.Unlock()
 		}
 		return ErrOverMaxInFlight
 	}
 
-	return r.sendRDY(c, count)
+	return c.sendRDY(conn, count)
 }
 
-func (r *Consumer) sendRDY(c Conn, count int64) error {
-	if count == 0 && c.LastRDY() == 0 {
+func (c *nsqConsumer) sendRDY(conn Conn, count int64) error {
+	if count == 0 && conn.LastRDY() == 0 {
 		// no need to send. It's already that RDY count
 		return nil
 	}
 
-	atomic.AddInt64(&r.totalRdyCount, count-c.RDY())
+	atomic.AddInt64(&c.totalRdyCount, count-conn.RDY())
 
-	lastRDY := c.LastRDY()
-	c.SetRDY(count)
+	lastRDY := conn.LastRDY()
+	conn.SetRDY(count)
 	if count == lastRDY {
 		return nil
 	}
 
-	err := c.WriteCommand(Ready(int(count)))
+	err := conn.WriteCommand(Ready(int(count)))
 	if err != nil {
-		r.log(LogLevelError, "(%s) error sending RDY %d - %s", c.String(), count, err)
+		c.log(LogLevelError, "(%s) error sending RDY %d - %s", conn.String(), count, err)
 		return err
 	}
 	return nil
 }
 
-func (r *Consumer) redistributeRDY() {
-	if r.inBackoffTimeout() {
+func (c *nsqConsumer) redistributeRDY() {
+	if c.inBackoffTimeout() {
 		return
 	}
 
 	// if an external heuristic set needRDYRedistributed we want to wait
 	// until we can actually redistribute to proceed
-	conns := r.conns()
+	conns := c.conns()
 	if len(conns) == 0 {
 		return
 	}
 
-	maxInFlight := r.getMaxInFlight()
+	maxInFlight := c.getMaxInFlight()
 	if len(conns) > int(maxInFlight) {
-		r.log(LogLevelDebug, "redistributing RDY state (%d conns > %d max_in_flight)",
+		c.log(LogLevelDebug, "redistributing RDY state (%d conns > %d max_in_flight)",
 			len(conns), maxInFlight)
-		atomic.StoreInt32(&r.needRDYRedistributed, 1)
+		atomic.StoreInt32(&c.needRDYRedistributed, 1)
 	}
 
-	if r.inBackoff() && len(conns) > 1 {
-		r.log(LogLevelDebug, "redistributing RDY state (in backoff and %d conns > 1)", len(conns))
-		atomic.StoreInt32(&r.needRDYRedistributed, 1)
+	if c.inBackoff() && len(conns) > 1 {
+		c.log(LogLevelDebug, "redistributing RDY state (in backoff and %d conns > 1)", len(conns))
+		atomic.StoreInt32(&c.needRDYRedistributed, 1)
 	}
 
-	if !atomic.CompareAndSwapInt32(&r.needRDYRedistributed, 1, 0) {
+	if !atomic.CompareAndSwapInt32(&c.needRDYRedistributed, 1, 0) {
 		return
 	}
 
 	possibleConns := make([]Conn, 0, len(conns))
-	for _, c := range conns {
-		lastMsgDuration := time.Now().Sub(c.LastMessageTime())
-		lastRdyDuration := time.Now().Sub(c.LastRdyTime())
-		rdyCount := c.RDY()
-		r.log(LogLevelDebug, "(%s) rdy: %d (last message received %s)",
-			c.String(), rdyCount, lastMsgDuration)
+	for _, conn := range conns {
+		lastMsgDuration := time.Now().Sub(conn.LastMessageTime())
+		lastRdyDuration := time.Now().Sub(conn.LastRdyTime())
+		rdyCount := conn.RDY()
+		c.log(LogLevelDebug, "(%s) rdy: %d (last message received %s)",
+			conn.String(), rdyCount, lastMsgDuration)
 		if rdyCount > 0 {
-			if lastMsgDuration > r.config.LowRdyIdleTimeout {
-				r.log(LogLevelDebug, "(%s) idle connection, giving up RDY", c.String())
-				r.updateRDY(c, 0)
-			} else if lastRdyDuration > r.config.LowRdyTimeout {
-				r.log(LogLevelDebug, "(%s) RDY timeout, giving up RDY", c.String())
-				r.updateRDY(c, 0)
+			if lastMsgDuration > c.config.LowRdyIdleTimeout {
+				c.log(LogLevelDebug, "(%s) idle connection, giving up RDY", conn.String())
+				c.updateRDY(conn, 0)
+			} else if lastRdyDuration > c.config.LowRdyTimeout {
+				c.log(LogLevelDebug, "(%s) RDY timeout, giving up RDY", conn.String())
+				c.updateRDY(conn, 0)
 			}
 		}
-		possibleConns = append(possibleConns, c)
+		possibleConns = append(possibleConns, conn)
 	}
 
-	availableMaxInFlight := int64(maxInFlight) - atomic.LoadInt64(&r.totalRdyCount)
-	if r.inBackoff() {
-		availableMaxInFlight = 1 - atomic.LoadInt64(&r.totalRdyCount)
+	availableMaxInFlight := int64(maxInFlight) - atomic.LoadInt64(&c.totalRdyCount)
+	if c.inBackoff() {
+		availableMaxInFlight = 1 - atomic.LoadInt64(&c.totalRdyCount)
 	}
 
 	for len(possibleConns) > 0 && availableMaxInFlight > 0 {
 		availableMaxInFlight--
-		r.rngMtx.Lock()
-		i := r.rng.Int() % len(possibleConns)
-		r.rngMtx.Unlock()
-		c := possibleConns[i]
+		c.rngMtx.Lock()
+		i := c.rng.Int() % len(possibleConns)
+		c.rngMtx.Unlock()
+		conn := possibleConns[i]
 		// delete
 		possibleConns = append(possibleConns[:i], possibleConns[i+1:]...)
-		r.log(LogLevelDebug, "(%s) redistributing RDY", c.String())
-		r.updateRDY(c, 1)
+		c.log(LogLevelDebug, "(%s) redistributing RDY", conn.String())
+		c.updateRDY(conn, 1)
 	}
 }
 
 // Stop will initiate a graceful stop of the Consumer (permanent)
 //
 // NOTE: receive on StopChan to block until this process completes
-func (r *Consumer) Stop() {
-	if !atomic.CompareAndSwapInt32(&r.stopFlag, 0, 1) {
+func (c *nsqConsumer) Stop() {
+	if !atomic.CompareAndSwapInt32(&c.stopFlag, 0, 1) {
 		return
 	}
 
-	r.log(LogLevelInfo, "stopping...")
+	c.log(LogLevelInfo, "stopping...")
 
-	if len(r.conns()) == 0 {
-		r.stopHandlers()
+	if len(c.conns()) == 0 {
+		c.stopHandlers()
 	} else {
-		for _, c := range r.conns() {
-			err := c.WriteCommand(StartClose())
+		for _, conn := range c.conns() {
+			err := conn.WriteCommand(StartClose())
 			if err != nil {
-				r.log(LogLevelError, "(%s) error sending CLS - %s", c.String(), err)
+				c.log(LogLevelError, "(%s) error sending CLS - %s", conn.String(), err)
 			}
 		}
 
@@ -1085,63 +1078,67 @@ func (r *Consumer) Stop() {
 			// we would cause a panic on channel close)
 			//
 			// instead, we just bypass handler closing and skip to the final exit
-			r.exit()
+			c.exit()
 		})
 	}
 }
 
-func (r *Consumer) stopHandlers() {
-	r.stopHandler.Do(func() {
-		r.log(LogLevelInfo, "stopping handlers")
-		close(r.incomingMessages)
+func (c *nsqConsumer) GetStopChan() chan int {
+	return c.StopChan
+}
+
+func (c *nsqConsumer) stopHandlers() {
+	c.stopHandler.Do(func() {
+		c.log(LogLevelInfo, "stopping handlers")
+		close(c.incomingMessages)
 	})
 }
 
-// AddHandler sets the Handler for messages received by this Consumer. This can be called
+// AddHandler sets the Handler for messages received by this Consumec. This can be called
 // multiple times to add additional handlers. Handler will have a 1:1 ratio to message handling goroutines.
 //
 // This panics if called after connecting to NSQD or NSQ Lookupd
 //
 // (see Handler or HandlerFunc for details on implementing this interface)
-func (r *Consumer) AddHandler(handler Handler) {
-	r.AddConcurrentHandlers(handler, 1)
+func (c *nsqConsumer) AddHandler(handler Handler) {
+	c.AddConcurrentHandlers(handler, 1)
 }
 
-// AddConcurrentHandlers sets the Handler for messages received by this Consumer.  It
+// AddConcurrentHandlers sets the Handler for messages received by this Consumec.  It
 // takes a second argument which indicates the number of goroutines to spawn for
 // message handling.
 //
 // This panics if called after connecting to NSQD or NSQ Lookupd
 //
 // (see Handler or HandlerFunc for details on implementing this interface)
-func (r *Consumer) AddConcurrentHandlers(handler Handler, concurrency int) {
-	if atomic.LoadInt32(&r.connectedFlag) == 1 {
+func (c *nsqConsumer) AddConcurrentHandlers(handler Handler, concurrency int) {
+	if atomic.LoadInt32(&c.connectedFlag) == 1 {
 		panic("already connected")
 	}
 
-	atomic.AddInt32(&r.runningHandlers, int32(concurrency))
+	atomic.AddInt32(&c.runningHandlers, int32(concurrency))
 	for i := 0; i < concurrency; i++ {
-		go r.handlerLoop(handler)
+		go c.handlerLoop(handler)
 	}
 }
 
-func (r *Consumer) handlerLoop(handler Handler) {
-	r.log(LogLevelDebug, "starting Handler")
+func (c *nsqConsumer) handlerLoop(handler Handler) {
+	c.log(LogLevelDebug, "starting Handler")
 
 	for {
-		message, ok := <-r.incomingMessages
+		message, ok := <-c.incomingMessages
 		if !ok {
 			goto exit
 		}
 
-		if r.shouldFailMessage(message, handler) {
+		if c.shouldFailMessage(message, handler) {
 			message.Finish()
 			continue
 		}
 
 		err := handler.HandleMessage(message)
 		if err != nil {
-			r.log(LogLevelError, "Handler returned error (%s) for msg %s", err, message.ID)
+			c.log(LogLevelError, "Handler returned error (%s) for msg %s", err, message.ID)
 			if !message.IsAutoResponseDisabled() {
 				message.Requeue(-1)
 			}
@@ -1154,16 +1151,16 @@ func (r *Consumer) handlerLoop(handler Handler) {
 	}
 
 exit:
-	r.log(LogLevelDebug, "stopping Handler")
-	if atomic.AddInt32(&r.runningHandlers, -1) == 0 {
-		r.exit()
+	c.log(LogLevelDebug, "stopping Handler")
+	if atomic.AddInt32(&c.runningHandlers, -1) == 0 {
+		c.exit()
 	}
 }
 
-func (r *Consumer) shouldFailMessage(message *Message, handler interface{}) bool {
+func (c *nsqConsumer) shouldFailMessage(message *Message, handler interface{}) bool {
 	// message passed the max number of attempts
-	if r.config.MaxAttempts > 0 && message.Attempts > r.config.MaxAttempts {
-		r.log(LogLevelWarning, "msg %s attempted %d times, giving up",
+	if c.config.MaxAttempts > 0 && message.Attempts > c.config.MaxAttempts {
+		c.log(LogLevelWarning, "msg %s attempted %d times, giving up",
 			message.ID, message.Attempts)
 
 		logger, ok := handler.(FailedMessageLogger)
@@ -1176,26 +1173,24 @@ func (r *Consumer) shouldFailMessage(message *Message, handler interface{}) bool
 	return false
 }
 
-func (r *Consumer) exit() {
-	r.exitHandler.Do(func() {
-		close(r.exitChan)
-		r.wg.Wait()
-		close(r.StopChan)
+func (c *nsqConsumer) exit() {
+	c.exitHandler.Do(func() {
+		close(c.exitChan)
+		c.wg.Wait()
+		close(c.StopChan)
 	})
 }
 
-func (r *Consumer) log(lvl LogLevel, line string, args ...interface{}) {
-	logger, logLvl := r.getLogger(lvl)
-
-	if logger == nil {
-		return
-	}
-
-	if logLvl > lvl {
-		return
-	}
-
-	logger.Output(2, fmt.Sprintf("%-4s %3d [%s/%s] %s",
-		lvl, r.id, r.topic, r.channel,
-		fmt.Sprintf(line, args...)))
+func (c *nsqConsumer) log(lvl LogLevel, line string, args ...interface{}) {
+	c.loggerCarrier.Log(
+		lvl,
+		fmt.Sprintf(
+			"%-4s %3d [%s/%s] %s",
+			lvl,
+			c.id,
+			c.topic,
+			c.channel,
+			fmt.Sprintf(line, args...),
+		),
+	)
 }

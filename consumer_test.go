@@ -18,7 +18,7 @@ import (
 
 type MyTestHandler struct {
 	t                *testing.T
-	q                *Consumer
+	q                Consumer
 	messagesSent     int
 	messagesReceived int
 	messagesFailed   int
@@ -206,7 +206,7 @@ func consumerTest(t *testing.T, cb func(c *Config)) {
 		t.Fatal("should be able to disconnect from an nsqd - " + err.Error())
 	}
 
-	<-q.StopChan
+	<-q.GetStopChan()
 
 	stats = q.Stats()
 	if stats.Connections != 0 {

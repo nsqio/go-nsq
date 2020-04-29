@@ -76,7 +76,7 @@ type ConnDelegate interface {
 // keeps the exported Consumer struct clean of the exported methods
 // required to implement the ConnDelegate interface
 type consumerConnDelegate struct {
-	r *Consumer
+	r Consumer
 }
 
 func (d *consumerConnDelegate) OnResponse(c Conn, data []byte) { d.r.onConnResponse(c, data) }

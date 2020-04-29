@@ -17,7 +17,7 @@ import (
 
 type ConsumerHandler struct {
 	t              *testing.T
-	q              *Consumer
+	q              Consumer
 	messagesGood   int
 	messagesFailed int
 }
@@ -272,7 +272,7 @@ func readMessages(topicName string, t *testing.T, msgCount int) {
 	if err != nil {
 		t.Fatalf(err.Error())
 	}
-	<-q.StopChan
+	<-q.GetStopChan()
 
 	if h.messagesGood != msgCount {
 		t.Fatalf("end of test. should have handled a diff number of messages %d != %d", h.messagesGood, msgCount)

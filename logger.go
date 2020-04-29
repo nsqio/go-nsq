@@ -1,19 +1,27 @@
 package nsq
 
 import (
-	"fmt"
 	"log"
 	"os"
 	"sync"
 )
 
-type LoggerCarrier interface {
-	GetLogLevel() LogLevel
-	GetLoggers() []logger
+type LoggerCarrierSetters interface {
 	SetLogger(l logger, lvl LogLevel, format string)
 	SetLoggerForLevel(l logger, lvl LogLevel, format string)
 	SetLoggerLevel(lvl LogLevel)
-	Log(lvl LogLevel, line string, addr string, args ...interface{})
+}
+
+type LoggerCarrierGetters interface {
+	GetLogLevel() LogLevel
+	GetLoggers() []logger
+	GetLogFormat(lvl LogLevel) string
+	Log(lvl LogLevel, msg string)
+}
+
+type LoggerCarrier interface {
+	LoggerCarrierGetters
+	LoggerCarrierSetters
 }
 
 type DefaultLoggerCarrier struct {
@@ -94,13 +102,18 @@ func (c *DefaultLoggerCarrier) GetLogLevel() LogLevel {
 	return c.logLvl
 }
 
+func (c *DefaultLoggerCarrier) GetLogFormat(lvl LogLevel) string {
+	c.logGuard.RLock()
+	defer c.logGuard.RUnlock()
+
+	return c.logFmt[lvl]
+}
+
 func (c *DefaultLoggerCarrier) Log(
 	lvl LogLevel,
-	line string,
-	addr string,
-	args ...interface{},
+	msg string,
 ) {
-	logger, logLvl, logFmt := c.logger[lvl], c.logLvl, c.logFmt[lvl]
+	logger, logLvl := c.logger[lvl], c.logLvl
 
 	if logger == nil {
 		return
@@ -112,12 +125,7 @@ func (c *DefaultLoggerCarrier) Log(
 
 	logger.Output(
 		2,
-		fmt.Sprintf(
-			"%-4s %s %s",
-			lvl,
-			fmt.Sprintf(logFmt, addr),
-			fmt.Sprintf(line, args...),
-		),
+		msg,
 	)
 }
 

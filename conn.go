@@ -43,6 +43,25 @@ type msgResponse struct {
 	backoff bool
 }
 
+// ConnEventsHandler describes the interface that should be implemented
+// for handling events that the a Conn might fire
+type ConnEventsHandler interface {
+	onConnResponse(c Conn, data []byte)
+	onConnError(c Conn, data []byte)
+	onConnHeartbeat(c Conn)
+	onConnIOError(c Conn, err error)
+	onConnClose(c Conn)
+}
+
+type ConnEventsMessageHandler interface {
+	onConnBackoff(c Conn)
+	onConnContinue(c Conn)
+	onConnResume(c Conn)
+	onConnMessage(conn Conn, msg *Message)
+	onConnMessageFinished(c Conn, msg *Message)
+	onConnMessageRequeued(c Conn, msg *Message)
+}
+
 type MessageEventsHandler interface {
 	onMessageFinish(message *Message)
 	onMessageRequeue(message *Message, delay time.Duration, backoff bool)
@@ -52,6 +71,7 @@ type MessageEventsHandler interface {
 type Conn interface {
 	fmt.Stringer
 	MessageEventsHandler
+	LoggerCarrierSetters
 
 	Connect() (*IdentifyResponse, error)
 	GetUnderlyingTCPConn() *net.TCPConn
@@ -69,9 +89,6 @@ type Conn interface {
 	WriteCommand(cmd *Command) error
 	Flush() error
 	GetInflightMessageCount() *int64
-
-	SetLoggerForLevel(l logger, lvl LogLevel, format string)
-	SetLoggerLevel(lvl LogLevel)
 }
 
 // Conn represents a connection to nsqd
@@ -756,5 +773,13 @@ func (c *nsqdConn) onMessageTouch(m *Message) {
 }
 
 func (c *nsqdConn) log(lvl LogLevel, line string, args ...interface{}) {
-	c.loggerCarrier.Log(lvl, line, c.String(), args...)
+	c.loggerCarrier.Log(
+		lvl,
+		fmt.Sprintf(
+			"%-4s %s %s",
+			lvl,
+			fmt.Sprintf(c.loggerCarrier.GetLogFormat(lvl), c.String()),
+			fmt.Sprintf(line, args...),
+		),
+	)
 }

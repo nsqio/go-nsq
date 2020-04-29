@@ -7,16 +7,6 @@ import (
 	"time"
 )
 
-// ConnEventsHandler describes the interface that should be implemented
-// for handling events that the a Conn might fire
-type ConnEventsHandler interface {
-	onConnResponse(c Conn, data []byte)
-	onConnError(c Conn, data []byte)
-	onConnHeartbeat(c Conn)
-	onConnIOError(c Conn, err error)
-	onConnClose(c Conn)
-}
-
 // Publisher describes the interface that should be implemented for a message
 // publisher.
 type Publisher interface {
@@ -50,6 +40,10 @@ type Producer interface {
 	Publisher
 	fmt.Stringer
 
+	SetLogger(l logger, lvl LogLevel)
+	SetLoggerLevel(lvl LogLevel)
+	SetLoggerForLevel(l logger, lvl LogLevel)
+
 	Ping() error
 	Stop()
 
@@ -57,8 +51,6 @@ type Producer interface {
 	getState() int32
 	setConn(c Conn)
 	setCloseChan(ch chan int)
-
-	SetLogger(l logger, lvl LogLevel)
 }
 
 // nsqProducer is a high-level type to publish to NSQ.
@@ -423,7 +415,10 @@ func (p *nsqProducer) transactionCleanup() {
 }
 
 func (p *nsqProducer) log(lvl LogLevel, line string, args ...interface{}) {
-	p.loggerCarrier.Log(lvl, line, p.String(), args...)
+	p.loggerCarrier.Log(
+		lvl,
+		fmt.Sprintf("%-4s %3d %s", lvl, p.id, fmt.Sprintf(line, args...)),
+	)
 }
 
 func (p *nsqProducer) onConnResponse(c Conn, data []byte) { p.responseChan <- data }
