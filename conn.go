@@ -140,9 +140,12 @@ func (c *Conn) getLogger() (logger, LogLevel, string) {
 // Connect dials and bootstraps the nsqd connection
 // (including IDENTIFY) and returns the IdentifyResponse
 func (c *Conn) Connect() (*IdentifyResponse, error) {
-	dialer := &net.Dialer{
-		LocalAddr: c.config.LocalAddr,
-		Timeout:   c.config.DialTimeout,
+	dialer := c.config.Dialer
+	if dialer == nil {
+		dialer = &net.Dialer{
+			LocalAddr: c.config.LocalAddr,
+			Timeout:   c.config.DialTimeout,
+		}
 	}
 
 	conn, err := dialer.Dial("tcp", c.addr)
