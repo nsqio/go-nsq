@@ -98,7 +98,6 @@ type Config struct {
 	// used to Initialize, Validate
 	configHandlers []configHandler
 
-	Dialer      Dialer        `opt:"dialer"`
 	DialTimeout time.Duration `opt:"dial_timeout" default:"1s"`
 
 	// Deadlines for network reads and writes
@@ -108,6 +107,10 @@ type Config struct {
 	// LocalAddr is the local address to use when dialing an nsqd.
 	// If empty, a local address is automatically chosen.
 	LocalAddr net.Addr `opt:"local_addr"`
+	// Dialer affect connection when dialing an nsqd. Overwrite this to connect over proxy.
+	//
+	// Conflict with options LocalAddr and DialTimeout.
+	Dialer Dialer `opt:"dialer"`
 
 	// Duration between polling lookupd for new producers, and fractional jitter to add to
 	// the lookupd pool loop. this helps evenly distribute requests even if multiple consumers
