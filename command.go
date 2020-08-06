@@ -103,11 +103,13 @@ func Auth(secret string) (*Command, error) {
 	return &Command{[]byte("AUTH"), nil, []byte(secret)}, nil
 }
 
-// Register creates a new Command to add a topic/channel for the connected nsqd
-func Register(topic string, channel string) *Command {
-	params := [][]byte{[]byte(topic)}
-	if len(channel) > 0 {
-		params = append(params, []byte(channel))
+// Register creates a new Command to add a topic/channel with state for the connected nsqd
+func Register(topic string, topicPaused int, channel string, channelPaused int) *Command {
+	params := [][]byte{
+		[]byte(topic),
+		[]byte(channel),
+		[]byte(strconv.Itoa(topicPaused)),
+		[]byte(strconv.Itoa(channelPaused)),
 	}
 	return &Command{[]byte("REGISTER"), params, nil}
 }
