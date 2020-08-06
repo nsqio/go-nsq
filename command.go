@@ -104,12 +104,13 @@ func Auth(secret string) (*Command, error) {
 }
 
 // Register creates a new Command to add a topic/channel with state for the connected nsqd
-func Register(topic string, topicPaused int, channel string, channelPaused int) *Command {
-	params := [][]byte{
-		[]byte(topic),
-		[]byte(channel),
-		[]byte(strconv.Itoa(topicPaused)),
-		[]byte(strconv.Itoa(channelPaused)),
+func Register(topic string, channel string, paused ...int) *Command {
+	params := [][]byte{[]byte(topic), []byte(channel)}
+	if len(paused) > 0 {
+		params = append(params, []byte(strconv.Itoa(paused[0]))) //topic isPaused
+		if len(paused) > 1 {
+			params = append(params, []byte(strconv.Itoa(paused[1]))) //channel isPaused
+		}
 	}
 	return &Command{[]byte("REGISTER"), params, nil}
 }
