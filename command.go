@@ -124,6 +124,7 @@ func UnRegister(topic string, channel string) *Command {
 	return &Command{[]byte("UNREGISTER"), params, nil}
 }
 
+// SyncState creates a new Command to sync a topic/channel pause state changes.
 func SyncState(topic string, channel string, state int) *Command {
 	params := [][]byte{[]byte(strconv.Itoa(state)), []byte(topic)}
 	if len(channel) > 0 {
