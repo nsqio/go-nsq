@@ -124,6 +124,14 @@ func UnRegister(topic string, channel string) *Command {
 	return &Command{[]byte("UNREGISTER"), params, nil}
 }
 
+func SyncState(topic string, channel string, state int) *Command {
+	params := [][]byte{[]byte(strconv.Itoa(state)), []byte(topic)}
+	if len(channel) > 0 {
+		params = append(params, []byte(channel))
+	}
+	return &Command{[]byte("SYNCSTATE"), params, nil}
+}
+
 // Ping creates a new Command to keep-alive the state of all the
 // announced topic/channels for a given client
 func Ping() *Command {
