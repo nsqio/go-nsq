@@ -8,15 +8,24 @@ Consumer
 
 Consuming messages from NSQ can be done by creating an instance of a Consumer and supplying it a handler.
 
+	package main
+	import (
+		"log"
+		"os/signal"
+		"github.com/nsqio/go-nsq"
+	)
+
 	type myMessageHandler struct {}
 
 	// HandleMessage implements the Handler interface.
 	func (h *myMessageHandler) HandleMessage(m *nsq.Message) error {
 		if len(m.Body) == 0 {
 			// Returning nil will automatically send a FIN command to NSQ to mark the message as processed.
+			// In this case, a message with an empty body is simply ignored/discarded.
 			return nil
 		}
 
+		// do whatever actual message processing is desired
 		err := processMessage(m.Body)
 
 		// Returning a non-nil error will automatically send a REQ command to NSQ to re-queue the message.
@@ -41,6 +50,11 @@ Consuming messages from NSQ can be done by creating an instance of a Consumer an
 		if err != nil {
 			log.Fatal(err)
 		}
+
+		// wait for signal to exit
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+		<-sigChan
 
 		// Gracefully stop the consumer.
 		consumer.Stop()
@@ -67,7 +81,7 @@ Producing messages can be done by creating an instance of a Producer.
 		log.Fatal(err)
 	}
 
-	// Gracefully stop the producer.
+	// Gracefully stop the producer when appropriate (e.g. before shutting down the service)
 	producer.Stop()
 
 */
