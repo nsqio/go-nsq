@@ -299,31 +299,8 @@ func (w *Producer) connect() error {
 	case StateInit:
 	case StateConnected:
 		return nil
-	default:
-		return ErrNotConnected
 	}
-
-	w.log(LogLevelInfo, "(%s) connecting to nsqd", w.addr)
-
-	w.conn = NewConn(w.addr, &w.config, &producerConnDelegate{w})
-	w.conn.SetLoggerLevel(w.getLogLevel())
-	format := fmt.Sprintf("%3d (%%s)", w.id)
-	for index := range w.logger {
-		w.conn.SetLoggerForLevel(w.logger[index], LogLevel(index), format)
-	}
-
-	_, err := w.conn.Connect()
-	if err != nil {
-		w.conn.Close()
-		w.log(LogLevelError, "(%s) error connecting to nsqd - %s", w.addr, err)
-		return err
-	}
-	atomic.StoreInt32(&w.state, StateConnected)
-	w.closeChan = make(chan int)
-	w.wg.Add(1)
-	go w.router()
-
-	return nil
+	return ErrNotConnected
 }
 
 func (w *Producer) close() {
