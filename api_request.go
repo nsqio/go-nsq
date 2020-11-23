@@ -3,7 +3,6 @@ package nsq
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -46,11 +45,14 @@ type wrappedResp struct {
 }
 
 // stores the result in the value pointed to by ret(must be a pointer)
-func apiRequestNegotiateV1(method string, endpoint string, body io.Reader, ret interface{}) error {
+func apiRequestNegotiateV1(method string, endpoint string, headers http.Header, ret interface{}) error {
 	httpclient := &http.Client{Transport: newDeadlineTransport(2 * time.Second)}
-	req, err := http.NewRequest(method, endpoint, body)
+	req, err := http.NewRequest(method, endpoint, nil)
 	if err != nil {
 		return err
+	}
+	for k, v := range headers {
+		req.Header[k] = v
 	}
 
 	req.Header.Add("Accept", "application/vnd.nsq; version=1.0")

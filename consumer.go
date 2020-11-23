@@ -8,6 +8,7 @@ import (
 	"math"
 	"math/rand"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"strconv"
@@ -492,7 +493,11 @@ retry:
 	r.log(LogLevelInfo, "querying nsqlookupd %s", endpoint)
 
 	var data lookupResp
-	err := apiRequestNegotiateV1("GET", endpoint, nil, &data)
+	headers := make(http.Header)
+	if r.config.AuthSecret != "" && r.config.LookupdAuthorization {
+		headers.Set("Authorization", fmt.Sprintf("Bearer %s", r.config.AuthSecret))
+	}
+	err := apiRequestNegotiateV1("GET", endpoint, headers, &data)
 	if err != nil {
 		r.log(LogLevelError, "error querying nsqlookupd (%s) - %s", endpoint, err)
 		retries++

@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
@@ -123,6 +124,36 @@ func TestConsumerTLSClientCert(t *testing.T) {
 			InsecureSkipVerify: true,
 		}
 	})
+}
+
+func TestConsumerLookupdAuthorization(t *testing.T) {
+	// confirm that LookupAuthorization = true sets Authorization header on lookudp call
+	config := NewConfig()
+	config.AuthSecret = "AuthSecret"
+	topicName := "auth" + strconv.Itoa(int(time.Now().Unix()))
+	q, _ := NewConsumer(topicName, "ch", config)
+	q.SetLogger(newTestLogger(t), LogLevelDebug)
+
+	var req bool
+	lookupd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req = true
+		if h := r.Header.Get("Authorization"); h != "Bearer AuthSecret" {
+			t.Errorf("got Auth header %q", h)
+		}
+		w.WriteHeader(404)
+	}))
+	defer lookupd.Close()
+
+	h := &MyTestHandler{
+		t: t,
+		q: q,
+	}
+	q.AddHandler(h)
+
+	q.ConnectToNSQLookupd(lookupd.URL)
+	if req == false {
+		t.Errorf("lookupd call not completed")
+	}
 }
 
 func TestConsumerTLSClientCertViaSet(t *testing.T) {
