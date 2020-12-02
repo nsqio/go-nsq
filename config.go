@@ -176,8 +176,10 @@ type Config struct {
 	// The server-side message timeout for messages delivered to this client
 	MsgTimeout time.Duration `opt:"msg_timeout" min:"0"`
 
-	// secret for nsqd authentication (requires nsqd 0.2.29+)
+	// Secret for nsqd authentication (requires nsqd 0.2.29+)
 	AuthSecret string `opt:"auth_secret"`
+	// Use AuthSecret as 'Authorization: Bearer {AuthSecret}' on lookupd queries
+	LookupdAuthorization bool `opt:"skip_lookupd_authorization" default:"true"`
 }
 
 // NewConfig returns a new default nsq configuration.
