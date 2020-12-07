@@ -374,6 +374,9 @@ func (r *Consumer) ConnectToNSQLookupd(addr string) error {
 //
 // A goroutine is spawned to handle continual polling.
 func (r *Consumer) ConnectToNSQLookupds(addresses []string) error {
+	if len(addresses) == 0 {
+		return errors.New("empty nsqlookupd servers list provided")
+	}
 	for _, addr := range addresses {
 		err := r.ConnectToNSQLookupd(addr)
 		if err != nil {
