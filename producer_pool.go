@@ -1,6 +1,7 @@
 package nsq
 
 import (
+	"errors"
 	"sync/atomic"
 )
 
@@ -46,6 +47,53 @@ func (p *ProducerPool) Publish(topic string, body []byte) error {
 	return err
 }
 
-func (p ProducerPool) PublishAsync(topic string, body []byte, doneChan chan *ProducerTransaction, args ...interface{}) error {
-	panic("not implemented")
+// PublishAsync does a round-robin asynchronous publish. If a publish fails it will enter a retry loop
+// to try the next sequential publisher in the pool. The retry loop will be executed for maxPublishRetries
+// or the number of publishers in the pool, whichever is smaller. If the message fails to publish after
+// exhausting all attempts, the failed transaction will be written to doneChan for handling.
+// If successful, the transaction is written to doneChan for handling.
+func (p *ProducerPool) PublishAsync(topic string, body []byte, doneChan chan *ProducerTransaction, args ...interface{}) error {
+	if len(p.Producers) < 1 {
+		return errors.New("no producers")
+	}
+
+	n := int(atomic.AddUint32(&p.next, 1))
+
+	maxAttempts := len(p.Producers)
+	if maxAttempts > p.MaxAttempts {
+		maxAttempts = p.MaxAttempts
+	}
+
+	go func(n int) {
+		ch := make(chan *ProducerTransaction, 1)
+		defer close(ch)
+
+		for attempt := 0; attempt < maxAttempts; attempt++ {
+
+			isLastAttempt := attempt+1 == maxAttempts
+
+			index := (n + attempt - 1) % len(p.Producers)
+			producer := p.Producers[index]
+
+			if err := producer.PublishAsync(topic, body, ch, args...); err != nil {
+				if isLastAttempt {
+					doneChan <- &ProducerTransaction{Error: err, Args: args}
+					break
+				}
+
+				producer.log(LogLevelInfo, "(%s) PublishAsync error - %s", producer.conn.String(), err)
+				continue
+			}
+
+			transaction := <-ch
+			if transaction.Error != nil && !isLastAttempt {
+				producer.log(LogLevelInfo, "(%s) PublishAsync error - %s", producer.conn.String(), transaction.Error)
+				continue
+			}
+			doneChan <- transaction
+			break
+		}
+	}(n)
+
+	return nil
 }
