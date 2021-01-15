@@ -295,11 +295,11 @@ func (w *Producer) connect() error {
 		return ErrStopped
 	}
 
-	switch state := atomic.LoadInt32(&w.state); state {
-	case StateInit:
-	case StateConnected:
+	state := atomic.LoadInt32(&w.state)
+	switch  {
+	case state == StateConnected:
 		return nil
-	default:
+	case state != StateInit:
 		return ErrNotConnected
 	}
 
