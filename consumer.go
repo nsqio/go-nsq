@@ -219,7 +219,7 @@ func (r *Consumer) conns() []*Conn {
 // The logger parameter is an interface that requires the following
 // method to be implemented (such as the the stdlib log.Logger):
 //
-//    Output(calldepth int, s string)
+//    Output(calldepth int, s string) error
 //
 func (r *Consumer) SetLogger(l logger, lvl LogLevel) {
 	r.logGuard.Lock()
