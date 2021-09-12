@@ -40,10 +40,12 @@ jobs:
 
       - name: download NSQ
         run: |
+          cd ${{env.SRCDIR}}
           curl -sSL "http://bitly-downloads.s3.amazonaws.com/nsq/${{matrix.nsq_ver}}.tar.gz" \
                     | tar -xzv --strip-components=1
 
       - name: test
         run: |
+          cd ${{env.SRCDIR}}
           export PATH=bin:$PATH
           ./test.sh
