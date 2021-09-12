@@ -80,8 +80,8 @@ func TestExponentialBackoff(t *testing.T) {
 
 func TestFullJitterBackoff(t *testing.T) {
 	expected := []time.Duration{
-		566028617 * time.Nanosecond,
-		1365407263 * time.Nanosecond,
+		724039541 * time.Nanosecond,
+		1603903257 * time.Nanosecond,
 		5232470547 * time.Nanosecond,
 		21467499218 * time.Nanosecond,
 	}

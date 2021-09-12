@@ -72,7 +72,7 @@ func (s *FullJitterStrategy) Calculate(attempt int) time.Duration {
 
 	backoffDuration := s.cfg.BackoffMultiplier *
 		time.Duration(math.Pow(2, float64(attempt)))
-	return time.Duration(s.rng.Intn(int(backoffDuration)))
+	return time.Duration(s.rng.Int63n(int64(backoffDuration)))
 }
 
 func (s *FullJitterStrategy) setConfig(cfg *Config) {
