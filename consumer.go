@@ -128,6 +128,7 @@ type Consumer struct {
 	lookupdRecheckChan chan int
 	lookupdHTTPAddrs   []string
 	lookupdQueryIndex  int
+	lookupdHttpClient  *http.Client
 
 	wg              sync.WaitGroup
 	runningHandlers int32
@@ -326,6 +327,11 @@ func (r *Consumer) ChangeMaxInFlight(maxInFlight int) {
 	}
 }
 
+// set lookupd http client
+func (r *Consumer) SetLookupdHttpClient(httpclient *http.Client) {
+	r.lookupdHttpClient = httpclient
+}
+
 // ConnectToNSQLookupd adds an nsqlookupd address to the list for this Consumer instance.
 //
 // If it is the first to be added, it initiates an HTTP request to discover nsqd
@@ -355,6 +361,23 @@ func (r *Consumer) ConnectToNSQLookupd(addr string) error {
 		}
 	}
 	r.lookupdHTTPAddrs = append(r.lookupdHTTPAddrs, parsedAddr)
+	if r.lookupdHttpClient == nil {
+		transport := &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   r.config.LookupdPollTimeout,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			ResponseHeaderTimeout: r.config.LookupdPollTimeout,
+			MaxIdleConns:          100,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+		}
+		r.lookupdHttpClient = &http.Client{
+			Transport: transport,
+			Timeout:   r.config.LookupdPollTimeout,
+		}
+	}
+
 	numLookupd := len(r.lookupdHTTPAddrs)
 	r.mtx.Unlock()
 
@@ -468,7 +491,7 @@ retry:
 	if r.config.AuthSecret != "" && r.config.LookupdAuthorization {
 		headers.Set("Authorization", fmt.Sprintf("Bearer %s", r.config.AuthSecret))
 	}
-	err := apiRequestNegotiateV1("GET", endpoint, headers, &data)
+	err := apiRequestNegotiateV1(r.lookupdHttpClient, "GET", endpoint, headers, &data)
 	if err != nil {
 		r.log(LogLevelError, "error querying nsqlookupd (%s) - %s", endpoint, err)
 		retries++
