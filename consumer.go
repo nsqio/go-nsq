@@ -581,6 +581,12 @@ func (r *Consumer) ConnectToNSQD(addr string) error {
 
 	r.mtx.Lock()
 	delete(r.pendingConnections, addr)
+	if atomic.LoadInt32(&r.stopFlag) == 1 {
+		r.mtx.Unlock()
+
+		conn.Close()
+		return errors.New("consumer stopped")
+	}
 	r.connections[addr] = conn
 	r.mtx.Unlock()
 
@@ -751,25 +757,31 @@ func (r *Consumer) onConnClose(c *Conn) {
 		// there are no lookupd and we still have this nsqd TCP address in our list...
 		// try to reconnect after a bit
 		go func(addr string) {
+			ticker := time.NewTicker(r.config.LookupdPollInterval)
+			defer ticker.Stop()
+
 			for {
 				r.log(LogLevelInfo, "(%s) re-connecting in %s", addr, r.config.LookupdPollInterval)
-				time.Sleep(r.config.LookupdPollInterval)
-				if atomic.LoadInt32(&r.stopFlag) == 1 {
-					break
-				}
-				r.mtx.RLock()
-				reconnect := indexOf(addr, r.nsqdTCPAddrs) >= 0
-				r.mtx.RUnlock()
-				if !reconnect {
-					r.log(LogLevelWarning, "(%s) skipped reconnect after removal...", addr)
+				select {
+				case <-ticker.C:
+					r.mtx.RLock()
+					reconnect := indexOf(addr, r.nsqdTCPAddrs) >= 0
+					r.mtx.RUnlock()
+					if !reconnect {
+						r.log(LogLevelWarning, "(%s) skipped reconnect after removal...", addr)
+						return
+					}
+
+					err := r.ConnectToNSQD(addr)
+					if err != nil && err != ErrAlreadyConnected {
+						r.log(LogLevelError, "(%s) error connecting to nsqd - %s", addr, err)
+						continue
+					}
+
+					return
+				case <-r.exitChan:
 					return
 				}
-				err := r.ConnectToNSQD(addr)
-				if err != nil && err != ErrAlreadyConnected {
-					r.log(LogLevelError, "(%s) error connecting to nsqd - %s", addr, err)
-					continue
-				}
-				break
 			}
 		}(c.String())
 	}
