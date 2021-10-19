@@ -1,8 +1,8 @@
 name: tests
 
 on:
-  push:         {branches: [master]}
-  pull_request: {branches: [master]}
+  push: { branches: [master] }
+  pull_request: { branches: [master] }
 
 jobs:
   test:
@@ -26,12 +26,12 @@ jobs:
           - imgtag: "golang:1.17-buster"
             goarch: "386"
             nsq_ver: "nsq-1.2.1.linux-amd64.go1.16.6"
-          
+
     container: "${{matrix.imgtag}}"
     env:
       GOPATH: "${{github.workspace}}/go"
       GOARCH: "${{matrix.goarch}}"
-      SRCDIR: "go/src/github.com/nsqio/go-nsq"
+      SRCDIR: "go/src/github.com/CodapeWild/go-nsq"
 
     steps:
       - uses: actions/checkout@v2

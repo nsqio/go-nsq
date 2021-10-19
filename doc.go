@@ -12,7 +12,7 @@ Consuming messages from NSQ can be done by creating an instance of a Consumer an
 	import (
 		"log"
 		"os/signal"
-		"github.com/nsqio/go-nsq"
+		"github.com/CodapeWild/go-nsq"
 	)
 
 	type myMessageHandler struct {}
