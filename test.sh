@@ -4,11 +4,11 @@ set -e
 # a helper script to run tests
 
 if ! which nsqd >/dev/null; then
-    echo "missing nsqd binary" && exit 1
+  echo "missing nsqd binary" && exit 1
 fi
 
 if ! which nsqlookupd >/dev/null; then
-    echo "missing nsqlookupd binary" && exit 1
+  echo "missing nsqlookupd binary" && exit 1
 fi
 
 # run nsqlookupd
@@ -29,10 +29,10 @@ NSQD_PID=$!
 sleep 0.3
 
 cleanup() {
-    echo "killing nsqd PID $NSQD_PID"
-    kill -s TERM $NSQD_PID || cat $NSQD_LOGFILE
-    echo "killing nsqlookupd PID $LOOKUPD_PID"
-    kill -s TERM $LOOKUPD_PID || cat $LOOKUP_LOGFILE
+  echo "killing nsqd PID $NSQD_PID"
+  kill -s TERM $NSQD_PID || cat $NSQD_LOGFILE
+  echo "killing nsqlookupd PID $LOOKUPD_PID"
+  kill -s TERM $LOOKUPD_PID || cat $LOOKUP_LOGFILE
 }
 trap cleanup INT TERM EXIT
 
