@@ -176,7 +176,7 @@ func (w *Producer) Stop() {
 		w.guard.Unlock()
 		return
 	}
-	w.log(LogLevelInfo, "stopping")
+	w.log(LogLevelInfo, "(%s) stopping", w.addr)
 	close(w.exitChan)
 	w.close()
 	w.guard.Unlock()
@@ -296,7 +296,7 @@ func (w *Producer) connect() error {
 	}
 
 	state := atomic.LoadInt32(&w.state)
-	switch  {
+	switch {
 	case state == StateConnected:
 		return nil
 	case state != StateInit:
@@ -363,7 +363,7 @@ func (w *Producer) router() {
 exit:
 	w.transactionCleanup()
 	w.wg.Done()
-	w.log(LogLevelInfo, "exiting router")
+	w.log(LogLevelInfo, "(%s) exiting router", w.conn.String())
 }
 
 func (w *Producer) popTransaction(frameType int32, data []byte) {
