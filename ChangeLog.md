@@ -1,5 +1,33 @@
 ## go-nsq Change Log
 
+### 1.1.0 - 2021-10-25
+
+ * #275/#281 - support separate Logger for each log level (thanks @crazyweave)
+ * #282 - consumer: reduce duplicate RDY (ready) count updates (thanks @andyxning)
+ * #283 - remove redundant Config initialized check (thanks @SwanSpouse)
+ * #313 - add Authorization header to lookup queries
+ * #321 - consumer: fix panic with some invalid lookupd http addresses (thanks @martin-sucha)
+ * #317 - producer: connect() code-style improvement (thanks @martin-sucha)
+ * #330 - fix random backoff jitter on 32-bit architectures
+ * #333 - consumer: re-use http client with keepalives for lookupd requests (thanks @JieTrancender)
+ * #336 - producer: shutdown logging prefix consistent with other logging (thanks @karalabe)
+ * #294 - docs: fix producer example (thanks @nikitabuyevich)
+ * #307 - docs: add exit signal handling to consumer example
+ * #324 - docs: fix Consumer.SetLogger() description (thanks @gabriel-vasile)
+ * #297 - add AUTHORS file
+ * #329/#330 - switch to GitHub Actions for CI
+
+### 1.0.8 - 2019-12-24
+
+Thanks to @judwhite, @vitaliytv, and @HaraldNordgren for contributing to testing and dependency management improvements
+
+ * #248 - support go modules
+ * #249 - consumer: update RDY when setting MaxInFlight to 0
+ * #267 - check response message size is positive (thanks @andyxning)
+ * #271 - godoc for publisher and consumer (thanks @skateinmars)
+ * #270 - set log level (thanks @YongHaoWu)
+ * #255 - go vet tls.Config copying (thanks @iaburton)
+
 ### 1.0.7 - 2017-08-04
 
 **Upgrading from 1.0.6**: There are no backward incompatible changes.
