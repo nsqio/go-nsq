@@ -367,6 +367,17 @@ exit:
 }
 
 func (w *Producer) popTransaction(frameType int32, data []byte) {
+	if len(w.transactions) == 0 {
+		dataLen := len(data)
+		if dataLen > 32 {
+			data = data[:32]
+		}
+		w.log(LogLevelError,
+			"(%s) unexpected response type=%d len=%d data[:32]=0x%x",
+			w.conn.String(), frameType, dataLen, data)
+		w.close()
+		return
+	}
 	t := w.transactions[0]
 	w.transactions = w.transactions[1:]
 	if frameType == FrameTypeError {
