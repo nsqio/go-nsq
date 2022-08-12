@@ -555,6 +555,12 @@ func (c *Conn) readLoop() {
 			msg.Delegate = delegate
 			msg.NSQDAddress = c.String()
 
+			if atomic.LoadInt64(&c.messagesInFlight) >= int64(c.config.MaxInFlight) {
+				// drop the msg send by nsqd when chan is full.
+				c.log(LogLevelWarning, "lost resend msg %s, maybe handler timeout?", msg.ID)
+				continue
+			}
+
 			atomic.AddInt64(&c.messagesInFlight, 1)
 			atomic.StoreInt64(&c.lastMsgTimestamp, time.Now().UnixNano())
 
