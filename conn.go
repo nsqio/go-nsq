@@ -20,6 +20,11 @@ import (
 	"github.com/golang/snappy"
 )
 
+const (
+	tcpSocketType  = "tcp"
+	unixSocketType = "unix"
+)
+
 // IdentifyResponse represents the metadata
 // returned from an IDENTIFY command to nsqd
 type IdentifyResponse struct {
@@ -61,10 +66,9 @@ type Conn struct {
 
 	config *Config
 
-	conn       net.Conn
-	tlsConn    *tls.Conn
-	addr       string
-	socketType string
+	conn    net.Conn
+	tlsConn *tls.Conn
+	addr    string
 
 	delegate ConnDelegate
 
@@ -93,13 +97,9 @@ func NewConn(addr string, config *Config, delegate ConnDelegate) *Conn {
 	if !config.initialized {
 		panic("Config must be created with NewConfig()")
 	}
-	socketType := "tcp"
-	if isSocket(addr) {
-		socketType = "unix"
-	}
+
 	return &Conn{
-		addr:       addr,
-		socketType: socketType,
+		addr: addr,
 
 		config:   config,
 		delegate: delegate,
@@ -183,7 +183,7 @@ func (c *Conn) Connect() (*IdentifyResponse, error) {
 		Timeout:   c.config.DialTimeout,
 	}
 
-	conn, err := dialer.Dial(c.socketType, c.addr)
+	conn, err := dialer.Dial(c.socketType(), c.addr)
 	if err != nil {
 		return nil, err
 	}
@@ -428,7 +428,7 @@ func (c *Conn) upgradeTLS(tlsConf *tls.Config) error {
 	if tlsConf != nil {
 		conf = tlsConf.Clone()
 	}
-	if c.socketType == "tcp" {
+	if c.socketType() == tcpSocketType {
 		host, _, err := net.SplitHostPort(c.addr)
 		if err != nil {
 			return err
@@ -771,6 +771,13 @@ func (c *Conn) log(lvl LogLevel, line string, args ...interface{}) {
 	logger.Output(2, fmt.Sprintf("%-4s %s %s", lvl,
 		fmt.Sprintf(logFmt, c.String()),
 		fmt.Sprintf(line, args...)))
+}
+
+func (c *Conn) socketType() string {
+	if isSocket(c.addr) {
+		return unixSocketType
+	}
+	return tcpSocketType
 }
 
 func isSocket(path string) bool {
