@@ -9,6 +9,7 @@ import (
 	"os"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -253,6 +254,28 @@ func TestProducerHeartbeat(t *testing.T) {
 	}
 
 	readMessages(topicName, t, msgCount+1)
+}
+
+func TestProducerHTTPConnectionFails(t *testing.T) {
+	config := NewConfig()
+	laddr := "127.0.0.1"
+
+	config.LocalAddr, _ = net.ResolveTCPAddr("tcp", laddr+":0")
+	config.MaxMsgSize = 1048576
+
+	w, _ := NewProducer("127.0.0.1:4151", config)
+	w.SetLogger(nullLogger, LogLevelInfo)
+
+	err := w.Publish("write_test", []byte("test"))
+	if err == nil {
+		t.Fatal("should fail connecting to HTTP endpoint", err)
+	}
+
+	if !strings.Contains(err.Error(), "unexpected HTTP response") {
+		t.Fatalf("should detect unexpected HTTP response, but got err: %s", err)
+	}
+
+	w.Stop()
 }
 
 func readMessages(topicName string, t *testing.T, msgCount int) {

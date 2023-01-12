@@ -355,7 +355,7 @@ func (c *Conn) identify() (*IdentifyResponse, error) {
 		return nil, ErrIdentify{err.Error()}
 	}
 
-	frameType, data, err := ReadUnpackedResponse(c)
+	frameType, data, err := ReadUnpackedResponse(c, c.config.MaxMsgSize)
 	if err != nil {
 		return nil, ErrIdentify{err.Error()}
 	}
@@ -434,7 +434,7 @@ func (c *Conn) upgradeTLS(tlsConf *tls.Config) error {
 	}
 	c.r = c.tlsConn
 	c.w = c.tlsConn
-	frameType, data, err := ReadUnpackedResponse(c)
+	frameType, data, err := ReadUnpackedResponse(c, c.config.MaxMsgSize)
 	if err != nil {
 		return err
 	}
@@ -452,7 +452,7 @@ func (c *Conn) upgradeDeflate(level int) error {
 	fw, _ := flate.NewWriter(conn, level)
 	c.r = flate.NewReader(conn)
 	c.w = fw
-	frameType, data, err := ReadUnpackedResponse(c)
+	frameType, data, err := ReadUnpackedResponse(c, c.config.MaxMsgSize)
 	if err != nil {
 		return err
 	}
@@ -469,7 +469,7 @@ func (c *Conn) upgradeSnappy() error {
 	}
 	c.r = snappy.NewReader(conn)
 	c.w = snappy.NewWriter(conn)
-	frameType, data, err := ReadUnpackedResponse(c)
+	frameType, data, err := ReadUnpackedResponse(c, c.config.MaxMsgSize)
 	if err != nil {
 		return err
 	}
@@ -490,7 +490,7 @@ func (c *Conn) auth(secret string) error {
 		return err
 	}
 
-	frameType, data, err := ReadUnpackedResponse(c)
+	frameType, data, err := ReadUnpackedResponse(c, c.config.MaxMsgSize)
 	if err != nil {
 		return err
 	}
@@ -518,7 +518,7 @@ func (c *Conn) readLoop() {
 			goto exit
 		}
 
-		frameType, data, err := ReadUnpackedResponse(c)
+		frameType, data, err := ReadUnpackedResponse(c, c.config.MaxMsgSize)
 		if err != nil {
 			if err == io.EOF && atomic.LoadInt32(&c.closeFlag) == 1 {
 				goto exit
