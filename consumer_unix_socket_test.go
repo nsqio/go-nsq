@@ -3,7 +3,6 @@ package nsq
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"fmt"
 	"net"
 	"net/http"
@@ -37,15 +36,6 @@ func TestUnixSocketConsumer(t *testing.T) {
 	consumerUnixSocketTest(t, nil)
 }
 
-func TestUnixSocketConsumerTLS(t *testing.T) {
-	consumerUnixSocketTest(t, func(c *Config) {
-		c.TlsV1 = true
-		c.TlsConfig = &tls.Config{
-			InsecureSkipVerify: true,
-		}
-	})
-}
-
 func TestUnixSocketConsumerDeflate(t *testing.T) {
 	consumerUnixSocketTest(t, func(c *Config) {
 		c.Deflate = true
@@ -55,46 +45,6 @@ func TestUnixSocketConsumerDeflate(t *testing.T) {
 func TestUnixSocketConsumerSnappy(t *testing.T) {
 	consumerUnixSocketTest(t, func(c *Config) {
 		c.Snappy = true
-	})
-}
-
-func TestUnixSocketConsumerTLSDeflate(t *testing.T) {
-	consumerUnixSocketTest(t, func(c *Config) {
-		c.TlsV1 = true
-		c.TlsConfig = &tls.Config{
-			InsecureSkipVerify: true,
-		}
-		c.Deflate = true
-	})
-}
-
-func TestUnixSocketConsumerTLSSnappy(t *testing.T) {
-	consumerUnixSocketTest(t, func(c *Config) {
-		c.TlsV1 = true
-		c.TlsConfig = &tls.Config{
-			InsecureSkipVerify: true,
-		}
-		c.Snappy = true
-	})
-}
-
-func TestUnixSocketConsumerTLSClientCert(t *testing.T) {
-	cert, _ := tls.LoadX509KeyPair("./test/client.pem", "./test/client.key")
-	consumerUnixSocketTest(t, func(c *Config) {
-		c.TlsV1 = true
-		c.TlsConfig = &tls.Config{
-			Certificates:       []tls.Certificate{cert},
-			InsecureSkipVerify: true,
-		}
-	})
-}
-
-func TestUnixSocketConsumerTLSClientCertViaSet(t *testing.T) {
-	consumerUnixSocketTest(t, func(c *Config) {
-		c.Set("tls_v1", true)
-		c.Set("tls_cert", "./test/client.pem")
-		c.Set("tls_key", "./test/client.key")
-		c.Set("tls_insecure_skip_verify", true)
 	})
 }
 
@@ -116,9 +66,6 @@ func consumerUnixSocketTest(t *testing.T, cb func(c *Config)) {
 		topicName = topicName + "_deflate"
 	} else if config.Snappy {
 		topicName = topicName + "_snappy"
-	}
-	if config.TlsV1 {
-		topicName = topicName + "_tls"
 	}
 	topicName = topicName + strconv.Itoa(int(time.Now().Unix()))
 	q, _ := NewConsumer(topicName, "ch", config)

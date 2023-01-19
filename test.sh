@@ -28,9 +28,9 @@ NSQD_PID=$!
 
 NSQD_UNIX_SOCKET_LOGFILE=$(mktemp -t nsqlookupd.XXXXXXX)
 NSQD_UNIX_SOCKET_DATA_PATH=$(mktemp -d tmp.XXXXXXX)
-echo "starting nsqd with unix socket --use-unix-sockets --tcp-address /tmp/nsqd.sock --https-address /tmp/nsqd-https.sock --data-path=$NSQD_UNIX_SOCKET_DATA_PATH --tls-cert=./test/server.pem --tls-key=./test/server.key --tls-root-ca-file=./test/ca.pem"
+echo "starting nsqd with unix socket --tcp-address /tmp/nsqd.sock --https-address /tmp/nsqd-https.sock --data-path=$NSQD_UNIX_SOCKET_DATA_PATH"
 echo "  logging to $NSQD_UNIX_SOCKET_LOGFILE"
-nsqd --use-unix-sockets --tcp-address /tmp/nsqd.sock --http-address /tmp/nsqd-http.sock --https-address /tmp/nsqd-https.sock --data-path=$NSQD_UNIX_SOCKET_DATA_PATH --tls-cert=./test/server.pem --tls-key=./test/server.key --tls-root-ca-file=./test/ca.pem >$NSQD_UNIX_SOCKET_LOGFILE 2>&1 &
+nsqd --tcp-address /tmp/nsqd.sock --http-address /tmp/nsqd-http.sock --data-path=$NSQD_UNIX_SOCKET_DATA_PATH >$NSQD_UNIX_SOCKET_LOGFILE 2>&1 &
 NSQD_UNIX_SOCKET_PID=$!
 
 sleep 0.3

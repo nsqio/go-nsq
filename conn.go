@@ -20,11 +20,6 @@ import (
 	"github.com/golang/snappy"
 )
 
-const (
-	tcpSocketType  = "tcp"
-	unixSocketType = "unix"
-)
-
 // IdentifyResponse represents the metadata
 // returned from an IDENTIFY command to nsqd
 type IdentifyResponse struct {
@@ -422,22 +417,20 @@ func (c *Conn) identify() (*IdentifyResponse, error) {
 }
 
 func (c *Conn) upgradeTLS(tlsConf *tls.Config) error {
+	// TLS does not support unix sockets
+	host, _, err := net.SplitHostPort(c.addr)
+	if err != nil {
+		return err
+	}
 
 	// create a local copy of the config to set ServerName for this connection
 	conf := &tls.Config{}
 	if tlsConf != nil {
 		conf = tlsConf.Clone()
 	}
-	if c.socketType() == tcpSocketType {
-		host, _, err := net.SplitHostPort(c.addr)
-		if err != nil {
-			return err
-		}
-		conf.ServerName = host
-	}
-
+	conf.ServerName = host
 	c.tlsConn = tls.Client(c.conn, conf)
-	err := c.tlsConn.Handshake()
+	err = c.tlsConn.Handshake()
 	if err != nil {
 		return err
 	}
@@ -775,9 +768,9 @@ func (c *Conn) log(lvl LogLevel, line string, args ...interface{}) {
 
 func (c *Conn) socketType() string {
 	if isSocket(c.addr) {
-		return unixSocketType
+		return "unix"
 	}
-	return tcpSocketType
+	return "tcp"
 }
 
 func isSocket(path string) bool {
