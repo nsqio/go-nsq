@@ -177,6 +177,9 @@ type Config struct {
 	// The server-side message timeout for messages delivered to this client
 	MsgTimeout time.Duration `opt:"msg_timeout" min:"0"`
 
+	// Maximum size of a single message in bytes (0 means no limit)
+	MaxMsgSize int32 `opt:"max_msg_size" min:"0" default:"0"`
+
 	// Secret for nsqd authentication (requires nsqd 0.2.29+)
 	AuthSecret string `opt:"auth_secret"`
 	// Use AuthSecret as 'Authorization: Bearer {AuthSecret}' on lookupd queries

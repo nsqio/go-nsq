@@ -21,6 +21,9 @@ const (
 	FrameTypeMessage  int32 = 2
 )
 
+// Used to detect if an unexpected HTTP response is read
+const httpResponseMsgSize = 1213486160
+
 var validTopicChannelNameRegex = regexp.MustCompile(`^[\.a-zA-Z0-9_-]+(#ephemeral)?$`)
 
 // IsValidTopicName checks a topic name for correctness
@@ -48,7 +51,7 @@ func isValidName(name string) bool {
 //    |  4-byte  || N-byte
 //    ------------------------...
 //        size       data
-func ReadResponse(r io.Reader) ([]byte, error) {
+func ReadResponse(r io.Reader, maxMsgSize int32) ([]byte, error) {
 	var msgSize int32
 
 	// message size
@@ -60,6 +63,14 @@ func ReadResponse(r io.Reader) ([]byte, error) {
 	if msgSize < 0 {
 		return nil, fmt.Errorf("response msg size is negative: %v", msgSize)
 	}
+
+	if maxMsgSize > 0 && msgSize > maxMsgSize {
+		if msgSize == httpResponseMsgSize {
+			return nil, fmt.Errorf("unexpected HTTP response, a nsqd TCP endpoint is required")
+		}
+		return nil, fmt.Errorf("response msg size %v exceeds configured maximum (%v)", msgSize, maxMsgSize)
+	}
+
 	// message binary data
 	buf := make([]byte, msgSize)
 	_, err = io.ReadFull(r, buf)
@@ -91,8 +102,8 @@ func UnpackResponse(response []byte) (int32, []byte, error) {
 // ReadUnpackedResponse reads and parses data from the underlying
 // TCP connection according to the NSQ TCP protocol spec and
 // returns the frameType, data or error
-func ReadUnpackedResponse(r io.Reader) (int32, []byte, error) {
-	resp, err := ReadResponse(r)
+func ReadUnpackedResponse(r io.Reader, maxMsgSize int32) (int32, []byte, error) {
+	resp, err := ReadResponse(r, maxMsgSize)
 	if err != nil {
 		return -1, nil, err
 	}
