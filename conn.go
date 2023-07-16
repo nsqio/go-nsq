@@ -692,7 +692,7 @@ func (c *Conn) cleanup() {
 			msgsInFlight = atomic.LoadInt64(&c.messagesInFlight)
 		}
 		if msgsInFlight > 0 {
-			if time.Now().Sub(lastWarning) > time.Second {
+			if time.Since(lastWarning) > time.Second {
 				c.log(LogLevelWarning, "draining... waiting for %d messages in flight", msgsInFlight)
 				lastWarning = time.Now()
 			}
@@ -701,7 +701,7 @@ func (c *Conn) cleanup() {
 		// until the readLoop has exited we cannot be sure that there
 		// still won't be a race
 		if atomic.LoadInt32(&c.readLoopRunning) == 1 {
-			if time.Now().Sub(lastWarning) > time.Second {
+			if time.Since(lastWarning) > time.Second {
 				c.log(LogLevelWarning, "draining... readLoop still running")
 				lastWarning = time.Now()
 			}
