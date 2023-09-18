@@ -1,5 +1,5 @@
 module github.com/nsqio/go-nsq
 
-go 1.11
+go 1.17
 
-require github.com/golang/snappy v0.0.1
+require github.com/golang/snappy v0.0.4
