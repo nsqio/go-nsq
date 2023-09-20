@@ -266,19 +266,8 @@ func (r *Consumer) getLogLevel() LogLevel {
 // of the following interfaces that modify the behavior
 // of the `Consumer`:
 //
-//    DiscoveryFilter
-//
-func (r *Consumer) SetBehaviorDelegate(cb interface{}) {
-	matched := false
-
-	if _, ok := cb.(DiscoveryFilter); ok {
-		matched = true
-	}
-
-	if !matched {
-		panic("behavior delegate does not have any recognized methods")
-	}
-
+//	DiscoveryFilter
+func (r *Consumer) SetBehaviorDelegate(cb DiscoveryFilter) {
 	r.behaviorDelegate = cb
 }
 
