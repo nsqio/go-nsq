@@ -121,6 +121,19 @@ func UnRegister(topic string, channel string) *Command {
 	return &Command{[]byte("UNREGISTER"), params, nil}
 }
 
+// SyncState creates a new Command to sync a topic/channel state changes, like paused, unpaused
+func SyncState(topic string, channel string, js map[string]interface{}) (*Command, error) {
+	body, err := json.Marshal(js)
+	if err != nil {
+		return nil, err
+	}
+	params := [][]byte{[]byte(topic)}
+	if len(channel) > 0 {
+		params = append(params, []byte(channel))
+	}
+	return &Command{[]byte("SYNCSTATE"), params, body}, nil
+}
+
 // Ping creates a new Command to keep-alive the state of all the
 // announced topic/channels for a given client
 func Ping() *Command {
