@@ -2,6 +2,7 @@ package nsq
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io/ioutil"
 	"log"
@@ -106,6 +107,47 @@ func TestProducerPublish(t *testing.T) {
 	}
 
 	readMessages(topicName, t, msgCount)
+}
+
+func TestProducerPublishWithContext(t *testing.T) {
+	topicName := "publish" + strconv.Itoa(int(time.Now().Unix()))
+	publishAttempts := 100
+	publishFailures := 0
+
+	config := NewConfig()
+	w, _ := NewProducer("127.0.0.1:4150", config)
+	w.SetLogger(nullLogger, LogLevelInfo)
+	defer w.Stop()
+
+	// with the low timeout, the DialContext will fail and close conn, so Ping w/ out context first
+	w.Ping()
+
+	timeout := time.Duration(10) * time.Microsecond
+	for i := 0; i < publishAttempts; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+
+		err := w.PublishWithContext(ctx, topicName, []byte("publish_test_case"))
+		if err != nil {
+			if err != context.DeadlineExceeded {
+				t.Fatalf("error %s", err)
+			}
+			t.Logf("error %s", err)
+			publishFailures++
+		}
+	}
+
+	err := w.Publish(topicName, []byte("bad_test_case"))
+	if err != nil {
+		t.Fatalf("error %s", err)
+	}
+
+	publishSuccesses := publishAttempts - publishFailures
+	if publishSuccesses == 0 || publishFailures == 0 {
+		t.Fatalf("expected both successful and failed publishes, got %d and %d", publishSuccesses, publishFailures)
+	}
+	// ensure that if a context.DeadlineExceeded error is returned, no message is actually published
+	readMessages(topicName, t, publishSuccesses)
 }
 
 func TestProducerMultiPublish(t *testing.T) {
@@ -333,6 +375,11 @@ func (m *mockProducerConn) SetLoggerLevel(lvl LogLevel) {}
 func (m *mockProducerConn) SetLoggerForLevel(logger logger, level LogLevel, format string) {}
 
 func (m *mockProducerConn) Connect() (*IdentifyResponse, error) {
+	ctx := context.Background()
+	return m.ConnectWithContext(ctx)
+}
+
+func (m *mockProducerConn) ConnectWithContext(ctx context.Context) (*IdentifyResponse, error) {
 	return &IdentifyResponse{}, nil
 }
 
@@ -342,6 +389,11 @@ func (m *mockProducerConn) Close() error {
 }
 
 func (m *mockProducerConn) WriteCommand(cmd *Command) error {
+	ctx := context.Background()
+	return m.WriteCommandWithContext(ctx, cmd)
+}
+
+func (m *mockProducerConn) WriteCommandWithContext(ctx context.Context, cmd *Command) error {
 	if bytes.Equal(cmd.Name, []byte("PUB")) {
 		m.pubCh <- struct{}{}
 	}
