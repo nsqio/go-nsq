@@ -3,7 +3,6 @@ package nsq
 import (
 	"bufio"
 	"bytes"
-	"compress/flate"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -15,7 +14,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	// The golang snappy appears to be strictly better than the klauspost
+	// version, but the klauspost flate also appears to be strictly better
+	// than compress/flate.
 	"github.com/golang/snappy"
+	"github.com/klauspost/compress/flate"
 )
 
 // IdentifyResponse represents the metadata
@@ -119,8 +122,7 @@ func NewConn(addr string, config *Config, delegate ConnDelegate) *Conn {
 // The logger parameter is an interface that requires the following
 // method to be implemented (such as the the stdlib log.Logger):
 //
-//    Output(calldepth int, s string)
-//
+//	Output(calldepth int, s string)
 func (c *Conn) SetLogger(l logger, lvl LogLevel, format string) {
 	c.logGuard.Lock()
 	defer c.logGuard.Unlock()
@@ -468,7 +470,7 @@ func (c *Conn) upgradeSnappy() error {
 		conn = c.tlsConn
 	}
 	c.r = snappy.NewReader(conn)
-	c.w = snappy.NewWriter(conn)
+	c.w = snappy.NewBufferedWriter(conn)
 	frameType, data, err := ReadUnpackedResponse(c, c.config.MaxMsgSize)
 	if err != nil {
 		return err
