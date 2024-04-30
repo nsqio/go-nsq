@@ -3,7 +3,6 @@ package nsq
 import (
 	"bufio"
 	"bytes"
-	"compress/flate"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -15,7 +14,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	// The golang snappy appears to be strictly better than the klauspost
+	// version, but the klauspost flate also appears to be strictly better
+	// than compress/flate.
 	"github.com/golang/snappy"
+	"github.com/klauspost/compress/flate"
 )
 
 // IdentifyResponse represents the metadata
