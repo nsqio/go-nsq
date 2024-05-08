@@ -122,7 +122,7 @@ func TestProducerPublishWithContext(t *testing.T) {
 	// with the low timeout, the DialContext will fail and close conn, so Ping w/ out context first
 	w.Ping()
 
-	timeout := time.Duration(10) * time.Microsecond
+	timeout := time.Duration(5) * time.Microsecond
 	for i := 0; i < publishAttempts; i++ {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
@@ -132,7 +132,6 @@ func TestProducerPublishWithContext(t *testing.T) {
 			if err != context.DeadlineExceeded {
 				t.Fatalf("error %s", err)
 			}
-			t.Logf("error %s", err)
 			publishFailures++
 		}
 	}

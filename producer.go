@@ -325,7 +325,6 @@ func (w *Producer) sendCommandAsync(ctx context.Context, cmd *Command, doneChan 
 	case <-w.exitChan:
 		return ErrStopped
 	case <-ctx.Done():
-		fmt.Println("sendCommandAsync ctx.Done(): ", ctx.Err()) // TODO: remove
 		return ctx.Err()
 	}
 
