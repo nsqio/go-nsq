@@ -214,6 +214,9 @@ func (r *Consumer) Stats() *ConsumerStats {
 
 // ChannelStats query channel statistical data
 func (r *Consumer) ChannelStats(timeout time.Duration) (*ChannelStats, error) {
+	if timeout <= 0 {
+		return nil, errors.New("timeout must be greater than 0")
+	}
 	conns := r.conns()
 	if len(conns) > 0 {
 		r.channelStatsTimeout = timeout
@@ -222,7 +225,7 @@ func (r *Consumer) ChannelStats(timeout time.Duration) (*ChannelStats, error) {
 			return nil, err
 		}
 	}
-	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(timeout))
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	select {
 	case channelStats := <-r.channelStatsChan:
