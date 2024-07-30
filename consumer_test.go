@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -25,7 +25,7 @@ type MyTestHandler struct {
 	messagesFailed   int
 }
 
-var nullLogger = log.New(ioutil.Discard, "", log.LstdFlags)
+var nullLogger = log.New(io.Discard, "", log.LstdFlags)
 
 func (h *MyTestHandler) LogFailedMessage(message *Message) {
 	h.messagesFailed++
@@ -58,7 +58,7 @@ func (h *MyTestHandler) HandleMessage(message *Message) error {
 func SendMessage(t *testing.T, port int, topic string, method string, body []byte) {
 	httpclient := &http.Client{}
 	endpoint := fmt.Sprintf("http://127.0.0.1:%d/%s?topic=%s", port, method, topic)
-	req, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(body))
+	req, _ := http.NewRequest("POST", endpoint, bytes.NewBuffer(body))
 	resp, err := httpclient.Do(req)
 	if err != nil {
 		t.Fatalf(err.Error())

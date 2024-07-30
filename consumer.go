@@ -2,6 +2,8 @@ package nsq
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -33,9 +35,9 @@ type Handler interface {
 // HandlerFunc is a convenience type to avoid having to declare a struct
 // to implement the Handler interface, it can be used like this:
 //
-// 	consumer.AddHandler(nsq.HandlerFunc(func(m *Message) error {
-// 		// handle the message
-// 	}))
+//	consumer.AddHandler(nsq.HandlerFunc(func(m *Message) error {
+//		// handle the message
+//	}))
 type HandlerFunc func(message *Message) error
 
 // HandleMessage implements the Handler interface
@@ -137,6 +139,9 @@ type Consumer struct {
 	stopHandler     sync.Once
 	exitHandler     sync.Once
 
+	channelStatsTimeout time.Duration
+	channelStatsChan    chan *ChannelStats
+
 	// read from this channel to block until consumer is cleanly stopped
 	StopChan chan int
 	exitChan chan int
@@ -180,6 +185,8 @@ func NewConsumer(topic string, channel string, config *Config) (*Consumer, error
 
 		rng: rand.New(rand.NewSource(time.Now().UnixNano())),
 
+		channelStatsChan: make(chan *ChannelStats),
+
 		StopChan: make(chan int),
 		exitChan: make(chan int),
 	}
@@ -205,6 +212,26 @@ func (r *Consumer) Stats() *ConsumerStats {
 	}
 }
 
+// ChannelStats query channel statistical data
+func (r *Consumer) ChannelStats(timeout time.Duration) (*ChannelStats, error) {
+	conns := r.conns()
+	if len(conns) > 0 {
+		r.channelStatsTimeout = timeout
+		if err := conns[0].stats(); err != nil {
+			r.log(LogLevelError, "(%s) error sending STATS - %s", conns[0].String(), err)
+			return nil, err
+		}
+	}
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(timeout))
+	defer cancel()
+	select {
+	case channelStats := <-r.channelStatsChan:
+		return channelStats, nil
+	case <-ctx.Done():
+		return nil, errors.New("timeout waiting for channel stats")
+	}
+}
+
 func (r *Consumer) conns() []*Conn {
 	r.mtx.RLock()
 	conns := make([]*Conn, 0, len(r.connections))
@@ -220,8 +247,7 @@ func (r *Consumer) conns() []*Conn {
 // The logger parameter is an interface that requires the following
 // method to be implemented (such as the the stdlib log.Logger):
 //
-//    Output(calldepth int, s string) error
-//
+//	Output(calldepth int, s string) error
 func (r *Consumer) SetLogger(l logger, lvl LogLevel) {
 	r.logGuard.Lock()
 	defer r.logGuard.Unlock()
@@ -266,8 +292,7 @@ func (r *Consumer) getLogLevel() LogLevel {
 // of the following interfaces that modify the behavior
 // of the `Consumer`:
 //
-//    DiscoveryFilter
-//
+//	DiscoveryFilter
 func (r *Consumer) SetBehaviorDelegate(cb interface{}) {
 	matched := false
 
@@ -312,7 +337,7 @@ func (r *Consumer) getMaxInFlight() int32 {
 // ChangeMaxInFlight sets a new maximum number of messages this comsumer instance
 // will allow in-flight, and updates all existing connections as appropriate.
 //
-// For example, ChangeMaxInFlight(0) would pause message flow
+// # For example, ChangeMaxInFlight(0) would pause message flow
 //
 // If already connected, it updates the reader RDY state for each connection.
 func (r *Consumer) ChangeMaxInFlight(maxInFlight int) {
@@ -714,6 +739,17 @@ func (r *Consumer) onConnResponse(c *Conn, data []byte) {
 	}
 }
 
+func (r *Consumer) onConnStats(c *Conn, data []byte) {
+	var channelStats *ChannelStats
+	_ = json.Unmarshal(data, &channelStats)
+	ctx, cancel := context.WithTimeout(context.Background(), r.channelStatsTimeout)
+	defer cancel()
+	select {
+	case <-ctx.Done():
+	case r.channelStatsChan <- channelStats:
+	}
+}
+
 func (r *Consumer) onConnError(c *Conn, data []byte) {}
 
 func (r *Consumer) onConnHeartbeat(c *Conn) {}
@@ -1109,7 +1145,7 @@ func (r *Consumer) stopHandlers() {
 // AddHandler sets the Handler for messages received by this Consumer. This can be called
 // multiple times to add additional handlers. Handler will have a 1:1 ratio to message handling goroutines.
 //
-// This panics if called after connecting to NSQD or NSQ Lookupd
+// # This panics if called after connecting to NSQD or NSQ Lookupd
 //
 // (see Handler or HandlerFunc for details on implementing this interface)
 func (r *Consumer) AddHandler(handler Handler) {
@@ -1120,7 +1156,7 @@ func (r *Consumer) AddHandler(handler Handler) {
 // takes a second argument which indicates the number of goroutines to spawn for
 // message handling.
 //
-// This panics if called after connecting to NSQD or NSQ Lookupd
+// # This panics if called after connecting to NSQD or NSQ Lookupd
 //
 // (see Handler or HandlerFunc for details on implementing this interface)
 func (r *Consumer) AddConcurrentHandlers(handler Handler, concurrency int) {
@@ -1228,7 +1264,7 @@ func buildLookupAddr(addr, topic string) (string, error) {
 		u.Path = "/lookup"
 	}
 
-	v, err := url.ParseQuery(u.RawQuery)
+	v, _ := url.ParseQuery(u.RawQuery)
 	v.Add("topic", topic)
 	u.RawQuery = v.Encode()
 	return u.String(), nil

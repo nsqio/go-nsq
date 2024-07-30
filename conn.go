@@ -119,8 +119,7 @@ func NewConn(addr string, config *Config, delegate ConnDelegate) *Conn {
 // The logger parameter is an interface that requires the following
 // method to be implemented (such as the the stdlib log.Logger):
 //
-//    Output(calldepth int, s string)
-//
+//	Output(calldepth int, s string)
 func (c *Conn) SetLogger(l logger, lvl LogLevel, format string) {
 	c.logGuard.Lock()
 	defer c.logGuard.Unlock()
@@ -414,6 +413,10 @@ func (c *Conn) identify() (*IdentifyResponse, error) {
 	return resp, nil
 }
 
+func (c *Conn) stats() error {
+	return c.WriteCommand(Stats())
+}
+
 func (c *Conn) upgradeTLS(tlsConf *tls.Config) error {
 	host, _, err := net.SplitHostPort(c.addr)
 	if err != nil {
@@ -559,6 +562,8 @@ func (c *Conn) readLoop() {
 			atomic.StoreInt64(&c.lastMsgTimestamp, time.Now().UnixNano())
 
 			c.delegate.OnMessage(c, msg)
+		case FrameTypeStats:
+			c.delegate.OnStats(c, data)
 		case FrameTypeError:
 			c.log(LogLevelError, "protocol error - %s", data)
 			c.delegate.OnError(c, data)

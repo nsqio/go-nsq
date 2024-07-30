@@ -19,6 +19,7 @@ const (
 	FrameTypeResponse int32 = 0
 	FrameTypeError    int32 = 1
 	FrameTypeMessage  int32 = 2
+	FrameTypeStats    int32 = 3
 )
 
 // Used to detect if an unexpected HTTP response is read
@@ -46,11 +47,11 @@ func isValidName(name string) bool {
 // ReadResponse is a client-side utility function to read from the supplied Reader
 // according to the NSQ protocol spec:
 //
-//    [x][x][x][x][x][x][x][x]...
-//    |  (int32) || (binary)
-//    |  4-byte  || N-byte
-//    ------------------------...
-//        size       data
+//	[x][x][x][x][x][x][x][x]...
+//	|  (int32) || (binary)
+//	|  4-byte  || N-byte
+//	------------------------...
+//	    size       data
 func ReadResponse(r io.Reader, maxMsgSize int32) ([]byte, error) {
 	var msgSize int32
 
@@ -84,11 +85,11 @@ func ReadResponse(r io.Reader, maxMsgSize int32) ([]byte, error) {
 // UnpackResponse is a client-side utility function that unpacks serialized data
 // according to NSQ protocol spec:
 //
-//    [x][x][x][x][x][x][x][x]...
-//    |  (int32) || (binary)
-//    |  4-byte  || N-byte
-//    ------------------------...
-//      frame ID     data
+//	[x][x][x][x][x][x][x][x]...
+//	|  (int32) || (binary)
+//	|  4-byte  || N-byte
+//	------------------------...
+//	  frame ID     data
 //
 // Returns a triplicate of: frame type, data ([]byte), error
 func UnpackResponse(response []byte) (int32, []byte, error) {
