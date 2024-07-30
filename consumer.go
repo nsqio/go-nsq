@@ -218,12 +218,13 @@ func (r *Consumer) ChannelStats(timeout time.Duration) (*ChannelStats, error) {
 		return nil, errors.New("timeout must be greater than 0")
 	}
 	conns := r.conns()
-	if len(conns) > 0 {
-		r.channelStatsTimeout = timeout
-		if err := conns[0].stats(); err != nil {
-			r.log(LogLevelError, "(%s) error sending STATS - %s", conns[0].String(), err)
-			return nil, err
-		}
+	if len(conns) == 0 {
+		return nil, errors.New("no connections")
+	}
+	r.channelStatsTimeout = timeout
+	if err := conns[0].stats(); err != nil {
+		r.log(LogLevelError, "(%s) error sending STATS - %s", conns[0].String(), err)
+		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
