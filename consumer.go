@@ -760,13 +760,18 @@ func (r *Consumer) onConnResponse(c *Conn, data []byte) {
 
 func (r *Consumer) onConnStats(c *Conn, data []byte) {
 	var channelStats *ChannelStats
-	_ = json.Unmarshal(data, &channelStats)
-	ctx, cancel := context.WithTimeout(context.Background(), r.channelStatsTimeout)
-	defer cancel()
-	select {
-	case <-ctx.Done():
-	case r.channelStatsMapChan <- map[string]*ChannelStats{c.String(): channelStats}:
+	if err := json.Unmarshal(data, &channelStats); err != nil {
+		r.log(LogLevelError, "(%s) failed to unmarshal channel stats response - %s", c.String(), err)
+		return
 	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), r.channelStatsTimeout)
+		defer cancel()
+		select {
+		case <-ctx.Done():
+		case r.channelStatsMapChan <- map[string]*ChannelStats{c.String(): channelStats}:
+		}
+	}()
 }
 
 func (r *Consumer) onConnError(c *Conn, data []byte) {}
