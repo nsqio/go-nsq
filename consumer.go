@@ -140,7 +140,7 @@ type Consumer struct {
 	exitHandler     sync.Once
 
 	channelStatsTimeout time.Duration
-	channelStatsChan    chan *ChannelStats
+	channelStatsMapChan chan map[string]*ChannelStats
 
 	// read from this channel to block until consumer is cleanly stopped
 	StopChan chan int
@@ -185,7 +185,7 @@ func NewConsumer(topic string, channel string, config *Config) (*Consumer, error
 
 		rng: rand.New(rand.NewSource(time.Now().UnixNano())),
 
-		channelStatsChan: make(chan *ChannelStats),
+		channelStatsMapChan: make(chan map[string]*ChannelStats),
 
 		StopChan: make(chan int),
 		exitChan: make(chan int),
@@ -213,27 +213,42 @@ func (r *Consumer) Stats() *ConsumerStats {
 }
 
 // ChannelStats query channel statistical data
-func (r *Consumer) ChannelStats(timeout time.Duration) (*ChannelStats, error) {
+func (r *Consumer) ChannelStats(timeout time.Duration) (map[string]*ChannelStats, error) {
 	if timeout <= 0 {
 		return nil, errors.New("timeout must be greater than 0")
 	}
-	conns := r.conns()
+	var (
+		conns           = r.conns()
+		channelStatsWG  sync.WaitGroup
+		channelStatsMap = make(map[string]*ChannelStats)
+	)
 	if len(conns) == 0 {
 		return nil, errors.New("no connections")
 	}
 	r.channelStatsTimeout = timeout
-	if err := conns[0].stats(); err != nil {
-		r.log(LogLevelError, "(%s) error sending STATS - %s", conns[0].String(), err)
-		return nil, err
+	for _, conn := range conns {
+		if err := conn.stats(); err != nil {
+			r.log(LogLevelError, "(%s) error sending STATS - %s", conn.String(), err)
+			return nil, err
+		}
+		channelStatsWG.Add(1)
+		go func(timeout time.Duration, wg *sync.WaitGroup) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			defer cancel()
+			select {
+			case data := <-r.channelStatsMapChan:
+				for addr, channelStats := range data {
+					channelStatsMap[addr] = channelStats
+				}
+				return
+			case <-ctx.Done():
+				return
+			}
+		}(timeout, &channelStatsWG)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	select {
-	case channelStats := <-r.channelStatsChan:
-		return channelStats, nil
-	case <-ctx.Done():
-		return nil, errors.New("timeout waiting for channel stats")
-	}
+	channelStatsWG.Wait()
+	return channelStatsMap, nil
 }
 
 func (r *Consumer) conns() []*Conn {
@@ -750,7 +765,7 @@ func (r *Consumer) onConnStats(c *Conn, data []byte) {
 	defer cancel()
 	select {
 	case <-ctx.Done():
-	case r.channelStatsChan <- channelStats:
+	case r.channelStatsMapChan <- map[string]*ChannelStats{c.String(): channelStats}:
 	}
 }
 
