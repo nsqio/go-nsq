@@ -92,7 +92,7 @@ func NewProducer(addr string, config *Config) (*Producer, error) {
 
 	// Set default logger for all log levels
 	l := log.New(os.Stderr, "", log.Flags())
-	for index, _ := range p.logger {
+	for index := range p.logger {
 		p.logger[index] = l
 	}
 	return p, nil
@@ -120,8 +120,7 @@ func (w *Producer) Ping() error {
 // The logger parameter is an interface that requires the following
 // method to be implemented (such as the the stdlib log.Logger):
 //
-//    Output(calldepth int, s string)
-//
+//	Output(calldepth int, s string)
 func (w *Producer) SetLogger(l logger, lvl LogLevel) {
 	w.logGuard.Lock()
 	defer w.logGuard.Unlock()

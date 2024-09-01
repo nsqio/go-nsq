@@ -5,7 +5,6 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"math"
 	"math/rand"
@@ -208,15 +207,15 @@ func NewConfig() *Config {
 //
 // Calls to Set() that take a time.Duration as an argument can be input as:
 //
-// 	"1000ms" (a string parsed by time.ParseDuration())
-// 	1000 (an integer interpreted as milliseconds)
-// 	1000*time.Millisecond (a literal time.Duration value)
+//	"1000ms" (a string parsed by time.ParseDuration())
+//	1000 (an integer interpreted as milliseconds)
+//	1000*time.Millisecond (a literal time.Duration value)
 //
 // Calls to Set() that take bool can be input as:
 //
-// 	"true" (a string parsed by strconv.ParseBool())
-// 	true (a boolean)
-// 	1 (an int where 1 == true and 0 == false)
+//	"true" (a string parsed by strconv.ParseBool())
+//	true (a boolean)
+//	1 (an int where 1 == true and 0 == false)
 //
 // It returns an error for an invalid option or value.
 func (c *Config) Set(option string, value interface{}) error {
@@ -434,7 +433,7 @@ func (t *tlsConfig) Set(c *Config, option string, value interface{}) error {
 			return fmt.Errorf("ERROR: %v is not a string", value)
 		}
 		tlsCertPool := x509.NewCertPool()
-		caCertFile, err := ioutil.ReadFile(filename)
+		caCertFile, err := os.ReadFile(filename)
 		if err != nil {
 			return fmt.Errorf("ERROR: failed to read custom Certificate Authority file %s", err)
 		}
