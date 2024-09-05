@@ -3,7 +3,7 @@ package nsq
 import (
 	"bytes"
 	"errors"
-	"io/ioutil"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -63,7 +63,7 @@ func TestProducerConnection(t *testing.T) {
 }
 
 func TestProducerPing(t *testing.T) {
-	log.SetOutput(ioutil.Discard)
+	log.SetOutput(io.Discard)
 	defer log.SetOutput(os.Stdout)
 
 	config := NewConfig()

@@ -184,7 +184,7 @@ func framedResponse(frameType int32, data []byte) []byte {
 		return nil
 	}
 
-	_, err = w.Write(data)
+	_, _ = w.Write(data)
 	return w.Bytes()
 }
 

@@ -3,7 +3,7 @@ package nsq
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net"
 	"net/http"
 	"time"
@@ -47,7 +47,7 @@ func apiRequestNegotiateV1(httpclient *http.Client, method string, endpoint stri
 		return err
 	}
 
-	respBody, err := ioutil.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if err != nil {
 		return err

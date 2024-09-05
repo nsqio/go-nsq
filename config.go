@@ -5,7 +5,6 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"math"
 	"math/rand"
@@ -434,7 +433,7 @@ func (t *tlsConfig) Set(c *Config, option string, value interface{}) error {
 			return fmt.Errorf("ERROR: %v is not a string", value)
 		}
 		tlsCertPool := x509.NewCertPool()
-		caCertFile, err := ioutil.ReadFile(filename)
+		caCertFile, err := os.ReadFile(filename)
 		if err != nil {
 			return fmt.Errorf("ERROR: failed to read custom Certificate Authority file %s", err)
 		}

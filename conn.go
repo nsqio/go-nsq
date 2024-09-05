@@ -471,7 +471,7 @@ func (c *Conn) upgradeSnappy() error {
 		conn = c.tlsConn
 	}
 	c.r = snappy.NewReader(conn)
-	c.w = snappy.NewWriter(conn)
+	c.w = snappy.NewBufferedWriter(conn)
 	frameType, data, err := ReadUnpackedResponse(c, c.config.MaxMsgSize)
 	if err != nil {
 		return err
