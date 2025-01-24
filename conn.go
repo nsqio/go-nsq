@@ -310,7 +310,7 @@ func (c *Conn) WriteCommandWithContext(ctx context.Context, cmd *Command) error 
 		c.mtx.Unlock()
 		return ctx.Err()
 	default:
-		_, err := cmd.WriteTo(c)
+		_, err = cmd.WriteTo(c)
 		if err != nil {
 			goto exit
 		}
