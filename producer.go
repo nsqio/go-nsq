@@ -391,14 +391,16 @@ func (w *Producer) router() {
 			err := w.conn.WriteCommandWithContext(t.ctx, t.cmd)
 			if err != nil {
 				w.log(LogLevelError, "(%s) sending command - %s", w.conn.String(), err)
-				if err == context.Canceled || err == context.DeadlineExceeded {
-					// keep the connection alive if related to context timeout
-					// need to do some stuff that's in Producer.popTransaction here
-					w.transactions = w.transactions[1:]
-					t.Error = err
-					t.finish()
+
+				switch err {
+				case context.Canceled:
+					w.popTransaction(FrameTypeContextCanceled, []byte(err.Error()))
+					continue
+				case context.DeadlineExceeded:
+					w.popTransaction(FrameTypeContextDeadlineExceeded, []byte(err.Error()))
 					continue
 				}
+
 				w.close()
 			}
 		case data := <-w.responseChan:
@@ -432,9 +434,16 @@ func (w *Producer) popTransaction(frameType int32, data []byte) {
 	}
 	t := w.transactions[0]
 	w.transactions = w.transactions[1:]
-	if frameType == FrameTypeError {
+
+	switch frameType {
+	case FrameTypeError:
 		t.Error = ErrProtocol{string(data)}
+	case FrameTypeContextCanceled:
+		t.Error = context.Canceled
+	case FrameTypeContextDeadlineExceeded:
+		t.Error = context.DeadlineExceeded
 	}
+
 	t.finish()
 }
 
