@@ -139,6 +139,10 @@ type Config struct {
 	Hostname  string `opt:"hostname"`
 	UserAgent string `opt:"user_agent"`
 
+	// Topology hints allow nsqd to prefer same zone and same region consumers
+	TopologyRegion string `opt:"topology_region"`
+	TopologyZone   string `opt:"topology_zone"`
+
 	// Duration of time between heartbeats. This must be less than ReadTimeout
 	HeartbeatInterval time.Duration `opt:"heartbeat_interval" default:"30s"`
 	// Integer percentage to sample the channel (requires nsqd 0.2.25+)
