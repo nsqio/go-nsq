@@ -415,6 +415,10 @@ func (c *Conn) identify() (*IdentifyResponse, error) {
 	return resp, nil
 }
 
+func (c *Conn) stats() error {
+	return c.WriteCommand(Stats())
+}
+
 func (c *Conn) upgradeTLS(tlsConf *tls.Config) error {
 	host, _, err := net.SplitHostPort(c.addr)
 	if err != nil {
@@ -560,6 +564,8 @@ func (c *Conn) readLoop() {
 			atomic.StoreInt64(&c.lastMsgTimestamp, time.Now().UnixNano())
 
 			c.delegate.OnMessage(c, msg)
+		case FrameTypeStats:
+			c.delegate.OnStats(c, data)
 		case FrameTypeError:
 			c.log(LogLevelError, "protocol error - %s", data)
 			c.delegate.OnError(c, data)

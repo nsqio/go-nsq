@@ -2,6 +2,8 @@ package nsq
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -137,6 +139,9 @@ type Consumer struct {
 	stopHandler     sync.Once
 	exitHandler     sync.Once
 
+	channelStatsTimeout time.Duration
+	channelStatsMapChan chan map[string]*ChannelStats
+
 	// read from this channel to block until consumer is cleanly stopped
 	StopChan chan int
 	exitChan chan int
@@ -180,6 +185,8 @@ func NewConsumer(topic string, channel string, config *Config) (*Consumer, error
 
 		rng: rand.New(rand.NewSource(time.Now().UnixNano())),
 
+		channelStatsMapChan: make(chan map[string]*ChannelStats),
+
 		StopChan: make(chan int),
 		exitChan: make(chan int),
 	}
@@ -203,6 +210,45 @@ func (r *Consumer) Stats() *ConsumerStats {
 		MessagesRequeued: atomic.LoadUint64(&r.messagesRequeued),
 		Connections:      len(r.conns()),
 	}
+}
+
+// ChannelStats query channel statistical data
+func (r *Consumer) ChannelStats(timeout time.Duration) (map[string]*ChannelStats, error) {
+	if timeout <= 0 {
+		return nil, errors.New("timeout must be greater than 0")
+	}
+	var (
+		conns           = r.conns()
+		channelStatsWG  sync.WaitGroup
+		channelStatsMap = make(map[string]*ChannelStats)
+	)
+	if len(conns) == 0 {
+		return nil, errors.New("no connections")
+	}
+	r.channelStatsTimeout = timeout
+	for _, conn := range conns {
+		if err := conn.stats(); err != nil {
+			r.log(LogLevelError, "(%s) error sending STATS - %s", conn.String(), err)
+			return nil, err
+		}
+		channelStatsWG.Add(1)
+		go func(timeout time.Duration, wg *sync.WaitGroup) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			defer cancel()
+			select {
+			case data := <-r.channelStatsMapChan:
+				for addr, channelStats := range data {
+					channelStatsMap[addr] = channelStats
+				}
+				return
+			case <-ctx.Done():
+				return
+			}
+		}(timeout, &channelStatsWG)
+	}
+	channelStatsWG.Wait()
+	return channelStatsMap, nil
 }
 
 func (r *Consumer) conns() []*Conn {
@@ -710,6 +756,22 @@ func (r *Consumer) onConnResponse(c *Conn, data []byte) {
 		r.log(LogLevelInfo, "(%s) received CLOSE_WAIT from nsqd", c.String())
 		c.Close()
 	}
+}
+
+func (r *Consumer) onConnStats(c *Conn, data []byte) {
+	var channelStats *ChannelStats
+	if err := json.Unmarshal(data, &channelStats); err != nil {
+		r.log(LogLevelError, "(%s) failed to unmarshal channel stats response - %s", c.String(), err)
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), r.channelStatsTimeout)
+		defer cancel()
+		select {
+		case <-ctx.Done():
+		case r.channelStatsMapChan <- map[string]*ChannelStats{c.String(): channelStats}:
+		}
+	}()
 }
 
 func (r *Consumer) onConnError(c *Conn, data []byte) {}
