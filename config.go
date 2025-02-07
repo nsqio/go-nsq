@@ -35,6 +35,12 @@ type BackoffStrategy interface {
 	Calculate(attempt int) time.Duration
 }
 
+// A Dialer is a means to establish a connection.
+type Dialer interface {
+	// Dial connects to the given address via the proxy.
+	Dial(network, addr string) (c net.Conn, err error)
+}
+
 // ExponentialStrategy implements an exponential backoff strategy (default)
 type ExponentialStrategy struct {
 	cfg *Config
@@ -100,6 +106,10 @@ type Config struct {
 	// LocalAddr is the local address to use when dialing an nsqd.
 	// If empty, a local address is automatically chosen.
 	LocalAddr net.Addr `opt:"local_addr"`
+	// Dialer affect connection when dialing an nsqd. Overwrite this to connect over proxy.
+	//
+	// Conflict with options LocalAddr and DialTimeout.
+	Dialer Dialer `opt:"dialer"`
 
 	// Duration between polling lookupd for new producers, and fractional jitter to add to
 	// the lookupd pool loop. this helps evenly distribute requests even if multiple consumers
