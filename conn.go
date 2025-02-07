@@ -9,7 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -59,7 +61,7 @@ type Conn struct {
 
 	config *Config
 
-	conn    *net.TCPConn
+	conn    net.Conn
 	tlsConn *tls.Conn
 	addr    string
 
@@ -90,6 +92,7 @@ func NewConn(addr string, config *Config, delegate ConnDelegate) *Conn {
 	if !config.initialized {
 		panic("Config must be created with NewConfig()")
 	}
+
 	return &Conn{
 		addr: addr,
 
@@ -175,11 +178,11 @@ func (c *Conn) Connect() (*IdentifyResponse, error) {
 		Timeout:   c.config.DialTimeout,
 	}
 
-	conn, err := dialer.Dial("tcp", c.addr)
+	conn, err := dialer.Dial(c.socketType(), c.addr)
 	if err != nil {
 		return nil, err
 	}
-	c.conn = conn.(*net.TCPConn)
+	c.conn = conn
 	c.r = conn
 	c.w = conn
 
@@ -217,7 +220,7 @@ func (c *Conn) Connect() (*IdentifyResponse, error) {
 func (c *Conn) Close() error {
 	atomic.StoreInt32(&c.closeFlag, 1)
 	if c.conn != nil && atomic.LoadInt64(&c.messagesInFlight) == 0 {
-		return c.conn.CloseRead()
+		return c.conn.Close()
 	}
 	return nil
 }
@@ -416,6 +419,7 @@ func (c *Conn) identify() (*IdentifyResponse, error) {
 }
 
 func (c *Conn) upgradeTLS(tlsConf *tls.Config) error {
+	// TLS does not support unix sockets
 	host, _, err := net.SplitHostPort(c.addr)
 	if err != nil {
 		return err
@@ -427,7 +431,6 @@ func (c *Conn) upgradeTLS(tlsConf *tls.Config) error {
 		conf = tlsConf.Clone()
 	}
 	conf.ServerName = host
-
 	c.tlsConn = tls.Client(c.conn, conf)
 	err = c.tlsConn.Handshake()
 	if err != nil {
@@ -667,7 +670,7 @@ func (c *Conn) close() {
 	c.stopper.Do(func() {
 		c.log(LogLevelInfo, "beginning close")
 		close(c.exitChan)
-		c.conn.CloseRead()
+		c.conn.Close()
 
 		c.wg.Add(1)
 		go c.cleanup()
@@ -721,7 +724,7 @@ func (c *Conn) waitForCleanup() {
 	// this blocks until readLoop and writeLoop
 	// (and cleanup goroutine above) have exited
 	c.wg.Wait()
-	c.conn.CloseWrite()
+	c.conn.Close()
 	c.log(LogLevelInfo, "clean close complete")
 	c.delegate.OnClose(c)
 }
@@ -763,4 +766,19 @@ func (c *Conn) log(lvl LogLevel, line string, args ...interface{}) {
 	logger.Output(2, fmt.Sprintf("%-4s %s %s", lvl,
 		fmt.Sprintf(logFmt, c.String()),
 		fmt.Sprintf(line, args...)))
+}
+
+func (c *Conn) socketType() string {
+	if isSocket(c.addr) {
+		return "unix"
+	}
+	return "tcp"
+}
+
+func isSocket(path string) bool {
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return fileInfo.Mode().Type() == fs.ModeSocket
 }
