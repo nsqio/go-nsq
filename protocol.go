@@ -16,9 +16,11 @@ var MagicV2 = []byte("  V2")
 
 // frame types
 const (
-	FrameTypeResponse int32 = 0
-	FrameTypeError    int32 = 1
-	FrameTypeMessage  int32 = 2
+	FrameTypeResponse                int32 = 0
+	FrameTypeError                   int32 = 1
+	FrameTypeMessage                 int32 = 2
+	FrameTypeContextCanceled         int32 = 3
+	FrameTypeContextDeadlineExceeded int32 = 4
 )
 
 // Used to detect if an unexpected HTTP response is read

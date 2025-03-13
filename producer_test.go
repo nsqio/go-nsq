@@ -2,6 +2,7 @@ package nsq
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"log"
@@ -106,6 +107,72 @@ func TestProducerPublish(t *testing.T) {
 	}
 
 	readMessages(topicName, t, msgCount)
+}
+
+func TestProducerPublishWithContext(t *testing.T) {
+	topicName := "publish" + strconv.Itoa(int(time.Now().Unix()))
+	publishAttempts := 100
+	ctxCanceledCount := 0
+	ctxDeadlineExceededCount := 0
+
+	config := NewConfig()
+	w, _ := NewProducer("127.0.0.1:4150", config)
+	w.SetLogger(nullLogger, LogLevelInfo)
+	defer w.Stop()
+
+	// with the low timeout, the DialContext will fail and close conn, so Ping w/ out context first
+	w.Ping()
+
+	timeout := 5 * time.Microsecond
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var errs []error
+	for i := 0; i < publishAttempts; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := w.PublishWithContext(ctx, topicName, []byte("publish_test_case"))
+			mu.Lock()
+			errs = append(errs, err)
+			mu.Unlock()
+		}()
+
+		// this sleep enables seeing both context.Canceled and context.DeadlineExceeded errors
+		time.Sleep(timeout)
+		cancel()
+	}
+	wg.Wait()
+
+	for _, err := range errs {
+		switch err {
+		case nil:
+		case context.Canceled:
+			ctxCanceledCount++
+		case context.DeadlineExceeded:
+			ctxDeadlineExceededCount++
+		default:
+			t.Fatalf("error %s", err)
+		}
+	}
+
+	if ctxCanceledCount == 0 || ctxDeadlineExceededCount == 0 {
+		t.Fatalf("expected both context.Canceled and context.DeadlineExceeded errors, got %d and %d respectively", ctxCanceledCount, ctxDeadlineExceededCount)
+	}
+
+	err := w.Publish(topicName, []byte("bad_test_case"))
+	if err != nil {
+		t.Fatalf("error %s", err)
+	}
+
+	publishFailures := ctxCanceledCount + ctxDeadlineExceededCount
+	publishSuccesses := publishAttempts - publishFailures
+	if publishSuccesses == 0 || publishFailures == 0 {
+		t.Fatalf("expected both successful and failed publishes, got %d and %d respectively", publishSuccesses, publishFailures)
+	}
+	// ensure that if a context error is returned, no message is actually published
+	readMessages(topicName, t, publishSuccesses)
 }
 
 func TestProducerMultiPublish(t *testing.T) {
@@ -333,6 +400,11 @@ func (m *mockProducerConn) SetLoggerLevel(lvl LogLevel) {}
 func (m *mockProducerConn) SetLoggerForLevel(logger logger, level LogLevel, format string) {}
 
 func (m *mockProducerConn) Connect() (*IdentifyResponse, error) {
+	ctx := context.Background()
+	return m.ConnectWithContext(ctx)
+}
+
+func (m *mockProducerConn) ConnectWithContext(ctx context.Context) (*IdentifyResponse, error) {
 	return &IdentifyResponse{}, nil
 }
 
@@ -342,6 +414,11 @@ func (m *mockProducerConn) Close() error {
 }
 
 func (m *mockProducerConn) WriteCommand(cmd *Command) error {
+	ctx := context.Background()
+	return m.WriteCommandWithContext(ctx, cmd)
+}
+
+func (m *mockProducerConn) WriteCommandWithContext(ctx context.Context, cmd *Command) error {
 	if bytes.Equal(cmd.Name, []byte("PUB")) {
 		m.pubCh <- struct{}{}
 	}

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"compress/flate"
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -170,12 +171,18 @@ func (c *Conn) getLogLevel() LogLevel {
 // Connect dials and bootstraps the nsqd connection
 // (including IDENTIFY) and returns the IdentifyResponse
 func (c *Conn) Connect() (*IdentifyResponse, error) {
+	ctx := context.Background()
+	return c.ConnectWithContext(ctx)
+}
+
+func (c *Conn) ConnectWithContext(ctx context.Context) (*IdentifyResponse, error) {
 	dialer := &net.Dialer{
 		LocalAddr: c.config.LocalAddr,
 		Timeout:   c.config.DialTimeout,
 	}
 
-	conn, err := dialer.Dial("tcp", c.addr)
+	// the timeout used is smallest of dialer.Timeout (config.DialTimeout) or context timeout
+	conn, err := dialer.DialContext(ctx, "tcp", c.addr)
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +196,7 @@ func (c *Conn) Connect() (*IdentifyResponse, error) {
 		return nil, fmt.Errorf("[%s] failed to write magic - %s", c.addr, err)
 	}
 
-	resp, err := c.identify()
+	resp, err := c.identify(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -199,7 +206,7 @@ func (c *Conn) Connect() (*IdentifyResponse, error) {
 			c.log(LogLevelError, "Auth Required")
 			return nil, errors.New("Auth Required")
 		}
-		err := c.auth(c.config.AuthSecret)
+		err := c.auth(ctx, c.config.AuthSecret)
 		if err != nil {
 			c.log(LogLevelError, "Auth Failed %s", err)
 			return nil, err
@@ -290,13 +297,26 @@ func (c *Conn) Write(p []byte) (int, error) {
 // WriteCommand is a goroutine safe method to write a Command
 // to this connection, and flush.
 func (c *Conn) WriteCommand(cmd *Command) error {
+	ctx := context.Background()
+	return c.WriteCommandWithContext(ctx, cmd)
+}
+
+func (c *Conn) WriteCommandWithContext(ctx context.Context, cmd *Command) error {
 	c.mtx.Lock()
 
-	_, err := cmd.WriteTo(c)
-	if err != nil {
+	var err error
+	select {
+	case <-ctx.Done():
+		c.mtx.Unlock()
+		return ctx.Err()
+	default:
+		_, err = cmd.WriteTo(c)
+		if err != nil {
+			goto exit
+		}
+		err = c.Flush()
 		goto exit
 	}
-	err = c.Flush()
 
 exit:
 	c.mtx.Unlock()
@@ -319,7 +339,7 @@ func (c *Conn) Flush() error {
 	return nil
 }
 
-func (c *Conn) identify() (*IdentifyResponse, error) {
+func (c *Conn) identify(ctx context.Context) (*IdentifyResponse, error) {
 	ci := make(map[string]interface{})
 	ci["client_id"] = c.config.ClientID
 	ci["hostname"] = c.config.Hostname
@@ -351,7 +371,7 @@ func (c *Conn) identify() (*IdentifyResponse, error) {
 		return nil, ErrIdentify{err.Error()}
 	}
 
-	err = c.WriteCommand(cmd)
+	err = c.WriteCommandWithContext(ctx, cmd)
 	if err != nil {
 		return nil, ErrIdentify{err.Error()}
 	}
@@ -480,13 +500,13 @@ func (c *Conn) upgradeSnappy() error {
 	return nil
 }
 
-func (c *Conn) auth(secret string) error {
+func (c *Conn) auth(ctx context.Context, secret string) error {
 	cmd, err := Auth(secret)
 	if err != nil {
 		return err
 	}
 
-	err = c.WriteCommand(cmd)
+	err = c.WriteCommandWithContext(ctx, cmd)
 	if err != nil {
 		return err
 	}

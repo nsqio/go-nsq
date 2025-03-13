@@ -1,6 +1,7 @@
 package nsq
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -15,8 +16,10 @@ type producerConn interface {
 	SetLoggerLevel(LogLevel)
 	SetLoggerForLevel(logger, LogLevel, string)
 	Connect() (*IdentifyResponse, error)
+	ConnectWithContext(context.Context) (*IdentifyResponse, error)
 	Close() error
 	WriteCommand(*Command) error
+	WriteCommandWithContext(context.Context, *Command) error
 }
 
 // Producer is a high-level type to publish to NSQ.
@@ -53,6 +56,7 @@ type Producer struct {
 // to retrieve metadata about the command after the
 // response is received.
 type ProducerTransaction struct {
+	ctx      context.Context
 	cmd      *Command
 	doneChan chan *ProducerTransaction
 	Error    error         // the error (or nil) of the publish command
@@ -105,14 +109,19 @@ func NewProducer(addr string, config *Config) (*Producer, error) {
 // configured correctly, rather than relying on the lazy "connect on Publish"
 // behavior of a Producer.
 func (w *Producer) Ping() error {
+	ctx := context.Background()
+	return w.PingWithContext(ctx)
+}
+
+func (w *Producer) PingWithContext(ctx context.Context) error {
 	if atomic.LoadInt32(&w.state) != StateConnected {
-		err := w.connect()
+		err := w.connect(ctx)
 		if err != nil {
 			return err
 		}
 	}
 
-	return w.conn.WriteCommand(Nop())
+	return w.conn.WriteCommandWithContext(ctx, Nop())
 }
 
 // SetLogger assigns the logger to use as well as a level
@@ -191,7 +200,13 @@ func (w *Producer) Stop() {
 // and the response error if present
 func (w *Producer) PublishAsync(topic string, body []byte, doneChan chan *ProducerTransaction,
 	args ...interface{}) error {
-	return w.sendCommandAsync(Publish(topic, body), doneChan, args)
+	ctx := context.Background()
+	return w.PublishAsyncWithContext(ctx, topic, body, doneChan, args...)
+}
+
+func (w *Producer) PublishAsyncWithContext(ctx context.Context, topic string, body []byte, doneChan chan *ProducerTransaction,
+	args ...interface{}) error {
+	return w.sendCommandAsync(ctx, Publish(topic, body), doneChan, args)
 }
 
 // MultiPublishAsync publishes a slice of message bodies to the specified topic
@@ -203,34 +218,55 @@ func (w *Producer) PublishAsync(topic string, body []byte, doneChan chan *Produc
 // and the response error if present
 func (w *Producer) MultiPublishAsync(topic string, body [][]byte, doneChan chan *ProducerTransaction,
 	args ...interface{}) error {
+	ctx := context.Background()
+	return w.MultiPublishAsyncWithContext(ctx, topic, body, doneChan, args...)
+}
+
+func (w *Producer) MultiPublishAsyncWithContext(ctx context.Context, topic string, body [][]byte, doneChan chan *ProducerTransaction,
+	args ...interface{}) error {
 	cmd, err := MultiPublish(topic, body)
 	if err != nil {
 		return err
 	}
-	return w.sendCommandAsync(cmd, doneChan, args)
+	return w.sendCommandAsync(ctx, cmd, doneChan, args)
 }
 
 // Publish synchronously publishes a message body to the specified topic, returning
 // an error if publish failed
 func (w *Producer) Publish(topic string, body []byte) error {
-	return w.sendCommand(Publish(topic, body))
+	ctx := context.Background()
+	return w.PublishWithContext(ctx, topic, body)
+}
+
+func (w *Producer) PublishWithContext(ctx context.Context, topic string, body []byte) error {
+	return w.sendCommand(ctx, Publish(topic, body))
 }
 
 // MultiPublish synchronously publishes a slice of message bodies to the specified topic, returning
 // an error if publish failed
 func (w *Producer) MultiPublish(topic string, body [][]byte) error {
+	ctx := context.Background()
+	return w.MultiPublishWithContext(ctx, topic, body)
+}
+
+func (w *Producer) MultiPublishWithContext(ctx context.Context, topic string, body [][]byte) error {
 	cmd, err := MultiPublish(topic, body)
 	if err != nil {
 		return err
 	}
-	return w.sendCommand(cmd)
+	return w.sendCommand(ctx, cmd)
 }
 
 // DeferredPublish synchronously publishes a message body to the specified topic
 // where the message will queue at the channel level until the timeout expires, returning
 // an error if publish failed
 func (w *Producer) DeferredPublish(topic string, delay time.Duration, body []byte) error {
-	return w.sendCommand(DeferredPublish(topic, delay, body))
+	ctx := context.Background()
+	return w.DeferredPublishWithContext(ctx, topic, delay, body)
+}
+
+func (w *Producer) DeferredPublishWithContext(ctx context.Context, topic string, delay time.Duration, body []byte) error {
+	return w.sendCommand(ctx, DeferredPublish(topic, delay, body))
 }
 
 // DeferredPublishAsync publishes a message body to the specified topic
@@ -243,12 +279,18 @@ func (w *Producer) DeferredPublish(topic string, delay time.Duration, body []byt
 // and the response error if present
 func (w *Producer) DeferredPublishAsync(topic string, delay time.Duration, body []byte,
 	doneChan chan *ProducerTransaction, args ...interface{}) error {
-	return w.sendCommandAsync(DeferredPublish(topic, delay, body), doneChan, args)
+	ctx := context.Background()
+	return w.DeferredPublishAsyncWithContext(ctx, topic, delay, body, doneChan, args...)
 }
 
-func (w *Producer) sendCommand(cmd *Command) error {
+func (w *Producer) DeferredPublishAsyncWithContext(ctx context.Context, topic string, delay time.Duration, body []byte,
+	doneChan chan *ProducerTransaction, args ...interface{}) error {
+	return w.sendCommandAsync(ctx, DeferredPublish(topic, delay, body), doneChan, args)
+}
+
+func (w *Producer) sendCommand(ctx context.Context, cmd *Command) error {
 	doneChan := make(chan *ProducerTransaction)
-	err := w.sendCommandAsync(cmd, doneChan, nil)
+	err := w.sendCommandAsync(ctx, cmd, doneChan, nil)
 	if err != nil {
 		close(doneChan)
 		return err
@@ -257,7 +299,7 @@ func (w *Producer) sendCommand(cmd *Command) error {
 	return t.Error
 }
 
-func (w *Producer) sendCommandAsync(cmd *Command, doneChan chan *ProducerTransaction,
+func (w *Producer) sendCommandAsync(ctx context.Context, cmd *Command, doneChan chan *ProducerTransaction,
 	args []interface{}) error {
 	// keep track of how many outstanding producers we're dealing with
 	// in order to later ensure that we clean them all up...
@@ -265,13 +307,14 @@ func (w *Producer) sendCommandAsync(cmd *Command, doneChan chan *ProducerTransac
 	defer atomic.AddInt32(&w.concurrentProducers, -1)
 
 	if atomic.LoadInt32(&w.state) != StateConnected {
-		err := w.connect()
+		err := w.connect(ctx)
 		if err != nil {
 			return err
 		}
 	}
 
 	t := &ProducerTransaction{
+		ctx:      ctx,
 		cmd:      cmd,
 		doneChan: doneChan,
 		Args:     args,
@@ -281,12 +324,14 @@ func (w *Producer) sendCommandAsync(cmd *Command, doneChan chan *ProducerTransac
 	case w.transactionChan <- t:
 	case <-w.exitChan:
 		return ErrStopped
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 
 	return nil
 }
 
-func (w *Producer) connect() error {
+func (w *Producer) connect(ctx context.Context) error {
 	w.guard.Lock()
 	defer w.guard.Unlock()
 
@@ -311,7 +356,7 @@ func (w *Producer) connect() error {
 		w.conn.SetLoggerForLevel(w.logger[index], LogLevel(index), format)
 	}
 
-	_, err := w.conn.Connect()
+	_, err := w.conn.ConnectWithContext(ctx)
 	if err != nil {
 		w.conn.Close()
 		w.log(LogLevelError, "(%s) error connecting to nsqd - %s", w.addr, err)
@@ -343,9 +388,19 @@ func (w *Producer) router() {
 		select {
 		case t := <-w.transactionChan:
 			w.transactions = append(w.transactions, t)
-			err := w.conn.WriteCommand(t.cmd)
+			err := w.conn.WriteCommandWithContext(t.ctx, t.cmd)
 			if err != nil {
 				w.log(LogLevelError, "(%s) sending command - %s", w.conn.String(), err)
+
+				switch err {
+				case context.Canceled:
+					w.popTransaction(FrameTypeContextCanceled, []byte(err.Error()))
+					continue
+				case context.DeadlineExceeded:
+					w.popTransaction(FrameTypeContextDeadlineExceeded, []byte(err.Error()))
+					continue
+				}
+
 				w.close()
 			}
 		case data := <-w.responseChan:
@@ -379,9 +434,16 @@ func (w *Producer) popTransaction(frameType int32, data []byte) {
 	}
 	t := w.transactions[0]
 	w.transactions = w.transactions[1:]
-	if frameType == FrameTypeError {
+
+	switch frameType {
+	case FrameTypeError:
 		t.Error = ErrProtocol{string(data)}
+	case FrameTypeContextCanceled:
+		t.Error = context.Canceled
+	case FrameTypeContextDeadlineExceeded:
+		t.Error = context.DeadlineExceeded
 	}
+
 	t.finish()
 }
 
