@@ -427,6 +427,7 @@ func (w *Producer) log(lvl LogLevel, line string, args ...interface{}) {
 }
 
 func (w *Producer) onConnResponse(c *Conn, data []byte) { w.responseChan <- data }
+func (w *Producer) onConnStats(c *Conn, data []byte)    {}
 func (w *Producer) onConnError(c *Conn, data []byte)    { w.errorChan <- data }
 func (w *Producer) onConnHeartbeat(c *Conn)             {}
 func (w *Producer) onConnIOError(c *Conn, err error)    { w.close() }

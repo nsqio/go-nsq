@@ -191,6 +191,12 @@ func Finish(id MessageID) *Command {
 	return &Command{[]byte("FIN"), params, nil}
 }
 
+// Stats creates a new command to indiciate that
+// query channel statistics data
+func Stats() *Command {
+	return &Command{[]byte("STATS"), nil, nil}
+}
+
 // Requeue creates a new Command to indicate that
 // a given message (by id) should be requeued after the given delay
 // NOTE: a delay of 0 indicates immediate requeue
