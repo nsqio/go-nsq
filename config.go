@@ -133,6 +133,9 @@ type Config struct {
 	// Duration between redistributing max-in-flight to connections
 	RDYRedistributeInterval time.Duration `opt:"rdy_redistribute_interval" min:"1ms" max:"5s" default:"5s"`
 
+	// Enable RDY trading between producing nsqds for situations of high max-in-flight and idle nsqds
+	RDYTrading bool `opt:"rdy_trading"`
+
 	// Identifiers sent to nsqd representing this client
 	// UserAgent is in the spirit of HTTP (default: "<client_library_name>/<version>")
 	ClientID  string `opt:"client_id"` // (defaults: short hostname)
