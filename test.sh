@@ -4,11 +4,11 @@ set -e
 # a helper script to run tests
 
 if ! which nsqd >/dev/null; then
-    echo "missing nsqd binary" && exit 1
+  echo "missing nsqd binary" && exit 1
 fi
 
 if ! which nsqlookupd >/dev/null; then
-    echo "missing nsqlookupd binary" && exit 1
+  echo "missing nsqlookupd binary" && exit 1
 fi
 
 # run nsqlookupd
@@ -26,13 +26,25 @@ echo "  logging to $NSQD_LOGFILE"
 nsqd --data-path=/tmp --lookupd-tcp-address=127.0.0.1:4160 --tls-cert=./test/server.pem --tls-key=./test/server.key --tls-root-ca-file=./test/ca.pem >$NSQD_LOGFILE 2>&1 &
 NSQD_PID=$!
 
+NSQD_UNIX_SOCKET_LOGFILE=$(mktemp -t nsqlookupd.XXXXXXX)
+NSQD_UNIX_SOCKET_DATA_PATH=$(mktemp -d tmp.XXXXXXX)
+echo "starting nsqd with unix socket --tcp-address /tmp/nsqd.sock --https-address /tmp/nsqd-https.sock --data-path=$NSQD_UNIX_SOCKET_DATA_PATH"
+echo "  logging to $NSQD_UNIX_SOCKET_LOGFILE"
+nsqd --tcp-address /tmp/nsqd.sock --http-address /tmp/nsqd-http.sock --data-path=$NSQD_UNIX_SOCKET_DATA_PATH >$NSQD_UNIX_SOCKET_LOGFILE 2>&1 &
+NSQD_UNIX_SOCKET_PID=$!
+
 sleep 0.3
 
 cleanup() {
-    echo "killing nsqd PID $NSQD_PID"
-    kill -s TERM $NSQD_PID || cat $NSQD_LOGFILE
-    echo "killing nsqlookupd PID $LOOKUPD_PID"
-    kill -s TERM $LOOKUPD_PID || cat $LOOKUP_LOGFILE
+  echo "killing nsqd PID $NSQD_PID"
+  kill -s TERM $NSQD_PID || cat $NSQD_LOGFILE
+  echo "killing nsqd unix socket PID $NSQD_UNIX_SOCKET_PID"
+  kill -s TERM $NSQD_UNIX_SOCKET_PID || cat $NSQD_LOGFILE
+  echo "killing nsqlookupd PID $LOOKUPD_PID"
+  kill -s TERM $LOOKUPD_PID || cat $LOOKUP_LOGFILE
+
+  rm -f /tmp/nsqd.sock
+  rm -f /tmp/nsqd-https.sock
 }
 trap cleanup INT TERM EXIT
 
