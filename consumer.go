@@ -511,13 +511,33 @@ retry:
 	if discoveryFilter, ok := r.behaviorDelegate.(DiscoveryFilter); ok {
 		nsqdAddrs = discoveryFilter.Filter(nsqdAddrs)
 	}
+
+	var successfulNsqdAddrs []string
 	for _, addr := range nsqdAddrs {
 		err = r.ConnectToNSQD(addr)
 		if err != nil && err != ErrAlreadyConnected {
 			r.log(LogLevelError, "(%s) error connecting to nsqd - %s", addr, err)
 			continue
 		}
+		successfulNsqdAddrs = append(successfulNsqdAddrs, addr)
 	}
+
+	// in the event that there are new nsqd addresses, remove the old connections from the connections map
+	for addr := range r.connections {
+		if !inAddrs(successfulNsqdAddrs, addr) {
+			delete(r.connections, addr)
+		}
+	}
+}
+
+func inAddrs(addrs []string, addr string) bool {
+	for _, a := range addrs {
+		if addr == a {
+			return true
+		}
+	}
+
+	return false
 }
 
 // ConnectToNSQDs takes multiple nsqd addresses to connect directly to.
