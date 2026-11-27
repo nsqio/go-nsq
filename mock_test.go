@@ -246,9 +246,17 @@ func TestConsumerBackoff(t *testing.T) {
 	q, _ := NewConsumer(topicName, "ch", config)
 	q.SetLogger(newTestLogger(t), LogLevelDebug)
 	q.AddHandler(&testHandler{})
+	defer func() {
+		q.Stop()
+		select {
+		case <-q.StopChan:
+		case <-time.After(5 * time.Second):
+			t.Error("consumer did not stop")
+		}
+	}()
 	err := q.ConnectToNSQD(n.tcpAddr.String())
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err.Error())
 	}
 
 	<-n.exitChan
@@ -317,9 +325,17 @@ func TestConsumerRequeueNoBackoff(t *testing.T) {
 	q, _ := NewConsumer(topicName, "ch", config)
 	q.SetLogger(newTestLogger(t), LogLevelDebug)
 	q.AddHandler(&testHandler{})
+	defer func() {
+		q.Stop()
+		select {
+		case <-q.StopChan:
+		case <-time.After(5 * time.Second):
+			t.Error("consumer did not stop")
+		}
+	}()
 	err := q.ConnectToNSQD(n.tcpAddr.String())
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err.Error())
 	}
 
 	select {
@@ -387,9 +403,17 @@ func TestConsumerBackoffDisconnect(t *testing.T) {
 	q, _ := NewConsumer(topicName, "ch", config)
 	q.SetLogger(newTestLogger(t), LogLevelDebug)
 	q.AddHandler(&testHandler{})
+	defer func() {
+		q.Stop()
+		select {
+		case <-q.StopChan:
+		case <-time.After(5 * time.Second):
+			t.Error("consumer did not stop")
+		}
+	}()
 	err := q.ConnectToNSQD(n.tcpAddr.String())
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err.Error())
 	}
 
 	select {
@@ -493,9 +517,17 @@ func TestConsumerPause(t *testing.T) {
 	q, _ := NewConsumer(topicName, "ch", config)
 	q.SetLogger(newTestLogger(t), LogLevelDebug)
 	q.AddHandler(&testHandler{})
+	defer func() {
+		q.Stop()
+		select {
+		case <-q.StopChan:
+		case <-time.After(5 * time.Second):
+			t.Error("consumer did not stop")
+		}
+	}()
 	err := q.ConnectToNSQD(n.tcpAddr.String())
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err.Error())
 	}
 
 	timeoutCh := time.After(500 * time.Millisecond)
