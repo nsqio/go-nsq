@@ -148,14 +148,14 @@ func TestProducerPublishAsync(t *testing.T) {
 	for i := 0; i < msgCount; i++ {
 		err := w.PublishAsync(topicName, []byte("publish_test_case"), responseChan, "test")
 		if err != nil {
-			t.Fatalf(err.Error())
+			t.Fatal(err.Error())
 		}
 	}
 
 	for i := 0; i < msgCount; i++ {
 		trans := <-responseChan
 		if trans.Error != nil {
-			t.Fatalf(trans.Error.Error())
+			t.Fatal(trans.Error.Error())
 		}
 		if trans.Args[0].(string) != "test" {
 			t.Fatalf(`proxied arg "%s" != "test"`, trans.Args[0].(string))
@@ -187,12 +187,12 @@ func TestProducerMultiPublishAsync(t *testing.T) {
 	responseChan := make(chan *ProducerTransaction)
 	err := w.MultiPublishAsync(topicName, testData, responseChan, "test0", 1)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err.Error())
 	}
 
 	trans := <-responseChan
 	if trans.Error != nil {
-		t.Fatalf(trans.Error.Error())
+		t.Fatal(trans.Error.Error())
 	}
 	if trans.Args[0].(string) != "test0" {
 		t.Fatalf(`proxied arg "%s" != "test0"`, trans.Args[0].(string))
@@ -235,7 +235,7 @@ func TestProducerHeartbeat(t *testing.T) {
 
 	err = w.Publish(topicName, []byte("publish_test_case"))
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err.Error())
 	}
 
 	time.Sleep(1100 * time.Millisecond)
@@ -293,7 +293,7 @@ func readMessages(topicName string, t *testing.T, msgCount int) {
 
 	err := q.ConnectToNSQD("127.0.0.1:4150")
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err.Error())
 	}
 	<-q.StopChan
 

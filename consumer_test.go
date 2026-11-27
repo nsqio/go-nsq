@@ -61,7 +61,7 @@ func SendMessage(t *testing.T, port int, topic string, method string, body []byt
 	req, _ := http.NewRequest("POST", endpoint, bytes.NewBuffer(body))
 	resp, err := httpclient.Do(req)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err.Error())
 		return
 	}
 	if resp.StatusCode != 200 {
